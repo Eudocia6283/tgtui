@@ -55,7 +55,8 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     let active_title = app.active_chat().map(|c| c.title.as_str());
-    let unread_total = app.chats.iter().map(|c| c.unread_count).sum();
+    // Like other clients, muted chats don't count towards the total.
+    let unread_total = app.chats.iter().filter(|c| !c.is_muted).map(|c| c.unread_count).sum();
     components::status_bar::render(
         f,
         status_area,

@@ -239,18 +239,7 @@ impl TdlibBackend {
     /// TDLib answers with updateNewMessage (pending) and later
     /// updateMessageSendSucceeded, which the receive thread forwards.
     fn send_content(&self, chat_id: i64, content: Value, reply_to_id: Option<i64>) {
-        let mut req = json!({
-            "@type": "sendMessage",
-            "chat_id": chat_id,
-            "input_message_content": content
-        });
-        if let Some(rid) = reply_to_id {
-            req["reply_to"] = json!({
-                "@type": "inputMessageReplyToMessage",
-                "message_id": rid
-            });
-        }
-        self.client.send(&req);
+        self.client.send(&send_message_request(chat_id, content, reply_to_id));
     }
 
     fn request_history(&self, chat_id: i64, from_message_id: i64, limit: usize, tag: &str) {
@@ -371,25 +360,48 @@ impl TelegramBackend for TdlibBackend {
         let photo_ok = dims.is_some_and(|(w, h)| w + h <= 10_000 && w.max(h) <= 20 * w.min(h).max(1))
             && size <= 10 * 1024 * 1024;
         let kind = if file.kind == MediaKind::Image && !photo_ok { MediaKind::File } else { file.kind };
-        let content = match kind {
-            MediaKind::Image => {
-                let (w, h) = dims.unwrap_or((0, 0));
+        let (w, h) = dims.unwrap_or((0, 0));
+        let caption = formatted_text(&caption);
+
+        // TDLib >= 1.8.5x wraps the file in inputPhoto / inputDocument;
+        // older versions take the InputFile directly.
+        let (current, legacy) = match kind {
+            MediaKind::Image => (
+                json!({
+                    "@type": "inputMessagePhoto",
+                    "photo": { "@type": "inputPhoto", "photo": input_file, "width": w, "height": h },
+                    "caption": caption
+                }),
                 json!({
                     "@type": "inputMessagePhoto",
                     "photo": input_file,
                     "width": w,
                     "height": h,
-                    "caption": formatted_text(&caption)
-                })
-            }
-            MediaKind::File => json!({
-                "@type": "inputMessageDocument",
-                "document": input_file,
-                "caption": formatted_text(&caption)
-            }),
+                    "caption": caption
+                }),
+            ),
+            MediaKind::File => (
+                json!({
+                    "@type": "inputMessageDocument",
+                    "document": { "@type": "inputDocument", "document": input_file },
+                    "caption": caption
+                }),
+                json!({
+                    "@type": "inputMessageDocument",
+                    "document": input_file,
+                    "caption": caption
+                }),
+            ),
         };
-        self.send_content(chat_id, content, reply_to_id);
-        Ok(())
+
+        match self.request(send_message_request(chat_id, current, reply_to_id)).await {
+            Ok(_) => Ok(()),
+            Err(e) if is_schema_mismatch(&e.to_string()) => self
+                .request(send_message_request(chat_id, legacy, reply_to_id))
+                .await
+                .map(|_| ()),
+            Err(e) => Err(e),
+        }
     }
 
     async fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<()> {
@@ -811,6 +823,29 @@ impl Worker {
             self.emit(BackendEvent::Error(message));
         }
     }
+}
+
+fn send_message_request(chat_id: i64, content: Value, reply_to_id: Option<i64>) -> Value {
+    let mut req = json!({
+        "@type": "sendMessage",
+        "chat_id": chat_id,
+        "input_message_content": content
+    });
+    if let Some(rid) = reply_to_id {
+        req["reply_to"] = json!({
+            "@type": "inputMessageReplyToMessage",
+            "message_id": rid
+        });
+    }
+    req
+}
+
+/// Errors meaning "this TDLib uses the other inputMessagePhoto/Document schema".
+fn is_schema_mismatch(err: &str) -> bool {
+    err.contains("InputFile is not specified")
+        || err.contains("inputPhoto")
+        || err.contains("inputDocument")
+        || err.contains("Unknown class")
 }
 
 fn formatted_text(text: &str) -> Value {
