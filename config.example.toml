@@ -41,7 +41,7 @@ image_viewer = "imv"
 # Opener for videos, audio and documents ('o')
 open_command = "xdg-open"
 
-# Desktop notification utility
+# Desktop notification fallback (used when D-Bus is unavailable / in --no-daemon mode)
 notify_command = "notify-send"
 
 # Real Telegram Account Integration (TDLib)
@@ -50,3 +50,16 @@ notify_command = "notify-send"
 api_id = 0
 api_hash = ""
 session_path = "~/.local/share/telegram-tui/tdlib"
+
+# Background service: keeps Telegram connected and sends notifications after the TUI exits
+[daemon]
+# Connect to / auto-start the service (false = single-process mode, no notifications after exit)
+enabled = true
+# Run when a notification is clicked and no TUI is open ({exe} = this binary)
+open_command = "kitty --class telegram-tui -e {exe} --chat {chat_id}"
+# Notification icon (icon theme name or file path)
+notify_icon = "org.telegram.desktop"
+# "Reply" field inside notifications (Noctalia supports it)
+inline_reply = true
+# On niri: focus the TUI window when a notification is clicked
+focus_window = true

@@ -1,5 +1,6 @@
 use super::model::*;
-use super::{BackendEvent, TelegramBackend};
+use super::tdlib::AuthState;
+use super::{Auth, BackendEvent, TelegramBackend};
 use anyhow::Result;
 use chrono::Local;
 use std::collections::HashMap;
@@ -200,6 +201,26 @@ impl TelegramBackend for MockBackend {
         if let Some(chat) = self.chats.lock().await.iter_mut().find(|c| c.id == chat_id) {
             chat.unread_count = 0;
         }
+        Ok(())
+    }
+}
+
+/// The demo account is always "logged in".
+#[async_trait::async_trait]
+impl Auth for MockBackend {
+    fn auth_watch(&self) -> tokio::sync::watch::Receiver<AuthState> {
+        tokio::sync::watch::channel(AuthState::Ready).1
+    }
+    async fn take_error(&self) -> Option<String> {
+        None
+    }
+    async fn send_phone_number(&self, _phone: &str) -> Result<()> {
+        Ok(())
+    }
+    async fn send_auth_code(&self, _code: &str) -> Result<()> {
+        Ok(())
+    }
+    async fn send_password(&self, _password: &str) -> Result<()> {
         Ok(())
     }
 }

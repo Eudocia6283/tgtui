@@ -13,6 +13,41 @@ pub struct Config {
     pub wayland: WaylandConfig,
     #[serde(default)]
     pub telegram: Option<TelegramCredentials>,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DaemonConfig {
+    /// The TUI connects to (and auto-starts) the background service, which
+    /// keeps Telegram connected and sends notifications after the TUI exits.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Run when a notification is clicked and no TUI is open.
+    /// `{exe}` = this binary, `{chat_id}` = the chat to open.
+    #[serde(default = "default_open_tui")]
+    pub open_command: String,
+    /// Icon name (from the icon theme) or path for notifications.
+    #[serde(default = "default_notify_icon")]
+    pub notify_icon: String,
+    /// Offer "Reply" inside notifications when the server supports it.
+    #[serde(default = "default_true")]
+    pub inline_reply: bool,
+    /// On niri, focus the TUI window when a notification is clicked.
+    #[serde(default = "default_true")]
+    pub focus_window: bool,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            open_command: default_open_tui(),
+            notify_icon: default_notify_icon(),
+            inline_reply: true,
+            focus_window: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +111,8 @@ fn default_copy() -> String { "wl-copy".into() }
 fn default_paste() -> String { "wl-paste".into() }
 fn default_viewer() -> String { "imv".into() }
 fn default_open() -> String { "xdg-open".into() }
+fn default_open_tui() -> String { "kitty --class telegram-tui -e {exe} --chat {chat_id}".into() }
+fn default_notify_icon() -> String { "org.telegram.desktop".into() }
 fn default_notify() -> String { "notify-send".into() }
 fn default_session_path() -> String {
     dirs::data_dir()

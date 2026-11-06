@@ -9,6 +9,8 @@ use tokio::task::JoinHandle;
 pub enum AppEvent {
     Input(CrosstermEvent),
     Backend(BackendEvent),
+    /// SIGHUP / SIGTERM (e.g. the terminal window was closed).
+    Quit,
 }
 
 pub struct EventHandler {
@@ -30,6 +32,20 @@ impl EventHandler {
                     break;
                 }
             }
+        });
+
+        // Leave cleanly (and save UI state) when the terminal goes away.
+        let tx_signal = tx.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            let (Ok(mut hup), Ok(mut term)) = (signal(SignalKind::hangup()), signal(SignalKind::terminate())) else {
+                return;
+            };
+            tokio::select! {
+                _ = hup.recv() => {}
+                _ = term.recv() => {}
+            }
+            let _ = tx_signal.send(AppEvent::Quit);
         });
 
         let mut handler = Self { tx, rx, input_task: None };

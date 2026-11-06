@@ -2,6 +2,7 @@ use crate::backend::model::{Attachment, Chat, MediaKind, Message};
 use crate::backend::{BackendEvent, TelegramBackend};
 use crate::config::Config;
 use crate::images::{self, ImageStore, Need};
+use crate::state::{self, UiState};
 use crate::mode::AppMode;
 use crate::ui::theme::Theme;
 use anyhow::{anyhow, Context, Result};
@@ -22,7 +23,7 @@ enum Pasted {
     Files(Vec<Attachment>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActivePane {
     Chats,
     Messages,
@@ -55,6 +56,14 @@ pub struct App {
     pub chat_scroll: Cell<usize>,
     pub fuzzy_scroll: Cell<usize>,
     pub images: ImageStore,
+    /// Whether the terminal window has focus (focus-change reporting).
+    pub focused: bool,
+    /// Last value sent with `set_viewing` (avoids repeating it).
+    viewing_sent: Option<Option<i64>>,
+    /// Saved UI state waiting for its chat to show up in the list.
+    pending_restore: Option<UiState>,
+    /// Message to select once the restored chat's history has loaded.
+    pending_message: Option<i64>,
     pub backend: Arc<dyn TelegramBackend>,
     /// Lets background tasks report back (same channel as backend events).
     events_tx: mpsc::UnboundedSender<BackendEvent>,
@@ -91,6 +100,10 @@ impl App {
             chat_scroll: Cell::new(0),
             fuzzy_scroll: Cell::new(0),
             theme: Theme::new(&config.ui),
+            focused: true,
+            viewing_sent: None,
+            pending_restore: None,
+            pending_message: None,
             images: ImageStore::new(config.ui.inline_images && crate::ui::kitty::is_supported()),
             backend,
             events_tx,
@@ -125,8 +138,105 @@ impl App {
             None => Vec::new(),
         };
         self.selected_msg_idx = self.messages.len().saturating_sub(1);
+        self.select_pending_message();
         self.mark_active_read().await;
         self.ensure_previews().await;
+        self.sync_viewing().await;
+        if self.pending_restore.is_none() {
+            state::save(&self.ui_state());
+        }
+        Ok(())
+    }
+
+    /// Tell the backend which chat is on screen in a focused window: it
+    /// controls "online" status and which chats get desktop notifications.
+    pub async fn sync_viewing(&mut self) {
+        let viewing = if self.focused { self.active_chat_id() } else { None };
+        if self.viewing_sent != Some(viewing) {
+            self.viewing_sent = Some(viewing);
+            let _ = self.backend.set_viewing(viewing).await;
+        }
+    }
+
+    pub async fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
+        self.sync_viewing().await;
+        if focused {
+            self.mark_active_read().await;
+        }
+    }
+
+    pub fn ui_state(&self) -> UiState {
+        UiState {
+            chat_id: self.active_chat_id(),
+            pane: Some(self.active_pane),
+            selected_message_id: self.messages.get(self.selected_msg_idx).map(|m| m.id),
+            input: self.input_buffer.clone(),
+            reply_to: self.reply_target_id.zip(self.replying_to.clone()),
+        }
+    }
+
+    /// Restore a saved UI state. If its chat isn't loaded yet (TDLib still
+    /// syncing), this is retried as chats arrive until the user takes over.
+    pub async fn restore(&mut self, saved: UiState) -> Result<()> {
+        self.pending_restore = Some(saved);
+        self.try_restore().await
+    }
+
+    pub async fn try_restore(&mut self) -> Result<()> {
+        let Some(saved) = &self.pending_restore else {
+            return Ok(());
+        };
+        let idx = match saved.chat_id {
+            Some(id) => match self.chats.iter().position(|c| c.id == id) {
+                Some(idx) => Some(idx),
+                None => return Ok(()), // wait for the chat to arrive
+            },
+            None => None,
+        };
+        let saved = self.pending_restore.take().unwrap_or_default();
+        if let Some(pane) = saved.pane {
+            self.active_pane = pane;
+        }
+        self.input_buffer = saved.input;
+        if let Some((id, preview)) = saved.reply_to {
+            self.reply_target_id = Some(id);
+            self.replying_to = Some(preview);
+        }
+        self.pending_message = saved.selected_message_id;
+        if let Some(idx) = idx {
+            let (reply_id, reply) = (self.reply_target_id, self.replying_to.clone());
+            self.selected_chat_idx = idx;
+            self.load_active_chat().await?;
+            // load_active_chat keeps these; switch_chat would clear them.
+            self.reply_target_id = reply_id;
+            self.replying_to = reply;
+        }
+        Ok(())
+    }
+
+    /// The user started interacting: never jump to a late-arriving chat.
+    pub fn cancel_restore(&mut self) {
+        self.pending_restore = None;
+    }
+
+    fn select_pending_message(&mut self) {
+        if let Some(id) = self.pending_message {
+            if let Some(i) = self.messages.iter().position(|m| m.id == id) {
+                self.selected_msg_idx = i;
+                self.pending_message = None;
+            }
+        }
+    }
+
+    /// A notification's "Open" was clicked while this TUI is running.
+    pub async fn open_chat_by_id(&mut self, chat_id: i64) -> Result<()> {
+        self.cancel_restore();
+        if let Some(idx) = self.chats.iter().position(|c| c.id == chat_id) {
+            self.mode = AppMode::Normal;
+            self.switch_chat(idx).await?;
+            self.focus_messages().await;
+        }
         Ok(())
     }
 
@@ -252,6 +362,7 @@ impl App {
         self.messages = messages;
         self.loading_older = false;
         self.select_message_id_or_clamp(keep_bottom, selected_id);
+        self.select_pending_message();
     }
 
     pub fn add_message(&mut self, msg: Message) {
@@ -580,6 +691,10 @@ impl App {
     }
 
     fn notify(&self, msg: &Message) {
+        // The background service notifies (and knows when we're looking).
+        if self.backend.notifies() {
+            return;
+        }
         if msg.is_outgoing || self.config.wayland.notify_command.trim().is_empty() {
             return;
         }
@@ -641,7 +756,7 @@ fn split_command(line: &str) -> Result<(&str, std::str::SplitWhitespace<'_>)> {
 
 /// Spawn a helper without touching the TUI's stdout/stderr, optionally feeding
 /// `stdin`, and reap it in the background so it doesn't linger as a zombie.
-fn spawn_command(line: &str, extra_args: &[String], stdin: Option<Vec<u8>>) -> Result<()> {
+pub fn spawn_command(line: &str, extra_args: &[String], stdin: Option<Vec<u8>>) -> Result<()> {
     let (program, args) = split_command(line)?;
     let mut child = Command::new(program)
         .args(args)
@@ -803,7 +918,9 @@ mod tests {
         std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut config = Config::default();
-        config.wayland.paste_command = bin.to_string_lossy().into_owned();
+        // Run through sh: exec'ing a just-written file can race with forks
+        // in other test threads (ETXTBSY).
+        config.wayland.paste_command = format!("sh {}", bin.display());
         let backend = Arc::new(crate::backend::mock::MockBackend::new(tx.clone()));
         (App::new(backend, config, tx), dir)
     }
@@ -903,7 +1020,16 @@ mod tests {
         let log = d.0.join("log");
         std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" > {0}.args\ncat > {0}.data\n", log.display())).unwrap();
         std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        copy_to_clipboard(&bin.to_string_lossy(), "image/png", b"DATA".to_vec()).unwrap();
+        // The program must be named wl-copy, so retry the rare ETXTBSY race.
+        let mut spawned = copy_to_clipboard(&bin.to_string_lossy(), "image/png", b"DATA".to_vec());
+        for _ in 0..20 {
+            if spawned.is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            spawned = copy_to_clipboard(&bin.to_string_lossy(), "image/png", b"DATA".to_vec());
+        }
+        spawned.unwrap();
         let args = log.with_extension("args");
         for _ in 0..100 {
             if std::fs::read(log.with_extension("data")).is_ok_and(|d| d == b"DATA") {

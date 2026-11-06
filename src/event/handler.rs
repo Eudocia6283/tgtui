@@ -8,8 +8,12 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, Mou
 pub async fn handle_event(app: &mut App, event: AppEvent) -> Result<()> {
     match event {
         AppEvent::Backend(evt) => handle_backend_event(app, evt).await?,
+        AppEvent::Quit => app.should_quit = true,
+        AppEvent::Input(Event::FocusGained) => app.set_focused(true).await,
+        AppEvent::Input(Event::FocusLost) => app.set_focused(false).await,
         AppEvent::Input(Event::Key(key)) if key.kind != KeyEventKind::Release => {
             app.status_msg = None;
+            app.cancel_restore();
             handle_key_event(app, key).await?;
         }
         AppEvent::Input(Event::Paste(text)) => match app.mode {
@@ -54,10 +58,12 @@ async fn handle_backend_event(app: &mut App, evt: BackendEvent) -> Result<()> {
             } else if is_active {
                 app.mark_active_read().await;
             }
+            app.try_restore().await?;
         }
         BackendEvent::ConnectionStatus(label) => app.connection = label,
         BackendEvent::Error(e) => app.set_status(format!("Telegram error: {e}")),
         BackendEvent::Status(msg) => app.set_status(msg),
+        BackendEvent::OpenChat { chat_id } => app.open_chat_by_id(chat_id).await?,
         BackendEvent::FileDownloaded { file_id, path } => app.preview_downloaded(file_id, path),
         BackendEvent::ImageDecoded { file_id, result } => app.images.decoded(file_id, result),
     }

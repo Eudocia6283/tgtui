@@ -2,7 +2,7 @@ use super::model::{
     format_chat_time, format_message_time, Attachment, Chat, ChatType, Media, MediaKind, Message,
     Preview, ReplyInfo, SendState,
 };
-use super::{BackendEvent, TelegramBackend};
+use super::{Auth, BackendEvent, TelegramBackend};
 use anyhow::{anyhow, bail, Result};
 use libloading::{Library, Symbol};
 use serde_json::{json, Value};
@@ -26,7 +26,7 @@ const HISTORY_TARGET: usize = 50;
 /// Upper bound for a single media download.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AuthState {
     WaitingParams,
     WaitingPhone,
@@ -91,6 +91,7 @@ pub struct TdlibBackend {
     auth_rx: watch::Receiver<AuthState>,
     closed: Arc<AtomicBool>,
     opened_chat: Mutex<Option<i64>>,
+    online: Mutex<Option<bool>>,
     next_request_id: AtomicU64,
     _lib: Arc<Library>,
 }
@@ -188,38 +189,28 @@ impl TdlibBackend {
             auth_rx,
             closed,
             opened_chat: Mutex::new(None),
+            online: Mutex::new(None),
             next_request_id: AtomicU64::new(1),
             _lib: lib,
         }))
     }
 
-    pub fn auth_watch(&self) -> watch::Receiver<AuthState> {
-        self.auth_rx.clone()
-    }
-
-    pub fn take_error(&self) -> Option<String> {
-        lock(&self.state).last_error.take()
-    }
-
-    pub fn send_phone_number(&self, phone: &str) {
+    /// TDLib's `online` option: true only while a user is looking at the
+    /// app, so a background service doesn't keep the account "online".
+    fn set_online(&self, online: bool) {
         self.client.send(&json!({
-            "@type": "setAuthenticationPhoneNumber",
-            "phone_number": phone.trim()
+            "@type": "setOption",
+            "name": "online",
+            "value": { "@type": "optionValueBoolean", "value": online }
         }));
     }
 
-    pub fn send_auth_code(&self, code: &str) {
-        self.client.send(&json!({
-            "@type": "checkAuthenticationCode",
-            "code": code.trim()
-        }));
-    }
-
-    pub fn send_password(&self, password: &str) {
-        self.client.send(&json!({
-            "@type": "checkAuthenticationPassword",
-            "password": password.trim_end_matches(['\r', '\n'])
-        }));
+    /// Close the chat opened by `get_messages` (e.g. when no UI is attached).
+    pub fn close_opened_chat(&self) {
+        let prev = self.opened_chat.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(chat_id) = prev {
+            self.client.send(&json!({ "@type": "closeChat", "chat_id": chat_id }));
+        }
     }
 
     /// Send a request and wait for its response (TDLib errors become `Err`).
@@ -255,8 +246,9 @@ impl TdlibBackend {
     }
 }
 
-impl Drop for TdlibBackend {
-    fn drop(&mut self) {
+impl TdlibBackend {
+    /// Close the TDLib client and wait (up to 3s) for it to finish.
+    pub fn shutdown(&self) {
         // The receive thread owns the client and destroys it once TDLib
         // reports `authorizationStateClosed`; destroying it here while the
         // thread is inside `receive` would be a use-after-free.
@@ -270,8 +262,59 @@ impl Drop for TdlibBackend {
     }
 }
 
+impl Drop for TdlibBackend {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+#[async_trait::async_trait]
+impl Auth for TdlibBackend {
+    fn auth_watch(&self) -> watch::Receiver<AuthState> {
+        self.auth_rx.clone()
+    }
+
+    async fn take_error(&self) -> Option<String> {
+        lock(&self.state).last_error.take()
+    }
+
+    async fn send_phone_number(&self, phone: &str) -> Result<()> {
+        self.client.send(&json!({
+            "@type": "setAuthenticationPhoneNumber",
+            "phone_number": phone.trim()
+        }));
+        Ok(())
+    }
+
+    async fn send_auth_code(&self, code: &str) -> Result<()> {
+        self.client.send(&json!({
+            "@type": "checkAuthenticationCode",
+            "code": code.trim()
+        }));
+        Ok(())
+    }
+
+    async fn send_password(&self, password: &str) -> Result<()> {
+        self.client.send(&json!({
+            "@type": "checkAuthenticationPassword",
+            "password": password.trim_end_matches(['\r', '\n'])
+        }));
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl TelegramBackend for TdlibBackend {
+    async fn set_viewing(&self, chat_id: Option<i64>) -> Result<()> {
+        let online = chat_id.is_some();
+        let mut last = self.online.lock().unwrap_or_else(|e| e.into_inner());
+        if *last != Some(online) {
+            *last = Some(online);
+            self.set_online(online);
+        }
+        Ok(())
+    }
+
     async fn get_chats(&self) -> Result<Vec<Chat>> {
         let st = lock(&self.state);
         let mut chats: Vec<Chat> = st.chats.values().filter(|c| c.order != 0).cloned().collect();

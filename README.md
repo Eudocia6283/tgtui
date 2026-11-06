@@ -91,15 +91,42 @@ On the first run, the client will prompt for your phone number, the verification
 
 ---
 
+## 🔔 Background Service & Notifications
+
+The TUI is a client of a small background service (`telegram-tui daemon`) that owns the
+Telegram (TDLib) connection. It is started automatically the first time you open the TUI and
+keeps running after you quit (`q`) or close the terminal, so you keep getting notifications.
+
+- Notifications go straight to the desktop notification server over D-Bus (Noctalia's
+  `org.freedesktop.Notifications`): one per chat, updated as messages arrive, closed once the
+  chat is read anywhere.
+- Actions: click / **Open** jumps to the chat (in the running TUI — focusing its niri window — or
+  in a new `kitty` window), **Mark as read**, and **Reply** right from the notification
+  (inline reply).
+- Chats you are looking at in a focused TUI window don't notify; muted chats never do. Your
+  account only shows as *online* while a TUI window has focus.
+- Reopening the TUI restores the chat, pane, selected message, draft and mounted reply.
+
+```fish
+telegram-tui daemon status            # running? logged in?
+telegram-tui daemon stop              # stop it (the next TUI start brings it back)
+telegram-tui daemon install-service   # optional: start with the graphical session (systemd --user)
+telegram-tui --no-daemon              # old single-process mode
+```
+
+Service log (when auto-started): `~/.local/state/telegram-tui/daemon.log`.
+
+---
+
 ## 🖥️ Command Line
 
 ```fish
-telegram-tui [-c|--config PATH] [--demo] [--single-column] [-h|--help] [-v|--version]
+telegram-tui [-c|--config PATH] [--chat ID] [--no-daemon] [--demo] [--single-column] [-h|--help] [-v|--version]
+telegram-tui daemon [run|stop|status|install-service] [-c PATH]
 ```
 
 Config is read from `--config`, else `./config.toml`, else `~/.config/telegram-tui/config.toml`.
-TDLib logs are written to `<session_path>/tdlib.log`. Desktop notifications (`notify_command`)
-are sent for new messages in other, non-muted chats.
+TDLib logs are written to `<session_path>/tdlib.log`.
 
 ---
 

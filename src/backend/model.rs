@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Local};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatType {
     Direct,
     Group,
@@ -8,7 +9,7 @@ pub enum ChatType {
     Bot,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chat {
     pub id: i64,
     pub title: String,
@@ -24,13 +25,13 @@ pub struct Chat {
     pub order: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplyInfo {
     pub sender_name: String,
     pub text_preview: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaKind {
     /// Opened with `image_viewer`.
     Image,
@@ -39,14 +40,14 @@ pub enum MediaKind {
 }
 
 /// A small still image shown inline (photo size or thumbnail).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preview {
     pub file_id: i32,
     /// Set when the file is already downloaded.
     pub local_path: Option<std::path::PathBuf>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Media {
     /// Full-size file, opened with `o`.
     pub file_id: i32,
@@ -54,7 +55,7 @@ pub struct Media {
     pub preview: Option<Preview>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SendState {
     #[default]
     Sent,
@@ -63,14 +64,14 @@ pub enum SendState {
 }
 
 /// A local file queued for sending.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
     pub path: std::path::PathBuf,
     /// Image = send as photo, File = send as document.
     pub kind: MediaKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: i64,
     pub chat_id: i64,

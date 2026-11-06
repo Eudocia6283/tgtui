@@ -316,3 +316,63 @@ async fn ticks_switch_from_sent_to_read() {
     let after = tick_line(&screen(&app, 110, 30)).unwrap();
     assert!(after.contains("✓✓"), "{after}");
 }
+
+#[tokio::test]
+async fn ui_state_roundtrips_and_restores() {
+    use crate::app::ActivePane;
+    use crate::state::UiState;
+    let (mut app, _rx) = setup().await;
+    let saved = UiState {
+        chat_id: Some(2),
+        pane: Some(ActivePane::Chats),
+        selected_message_id: Some(102),
+        input: "half-written draft".into(),
+        reply_to: Some((101, "Alice: Has anyone…".into())),
+    };
+    app.restore(saved.clone()).await.unwrap();
+    assert_eq!(app.active_chat_id(), Some(2));
+    assert_eq!(app.active_pane, ActivePane::Chats);
+    assert_eq!(app.messages[app.selected_msg_idx].id, 102);
+    assert_eq!(app.input_buffer, "half-written draft");
+    assert_eq!(app.reply_target_id, Some(101));
+    // Saving gives back the same state.
+    assert_eq!(app.ui_state(), saved);
+}
+
+#[tokio::test]
+async fn restore_waits_for_late_chat_unless_user_moves_first() {
+    use crate::state::UiState;
+    let late_chat = |app: &App| {
+        let mut c = app.chats[3].clone();
+        c.id = 999;
+        c.title = "Arrives later".into();
+        c
+    };
+
+    // TDLib still syncing: the saved chat shows up a moment later.
+    let (mut app, _rx) = setup().await;
+    app.restore(UiState { chat_id: Some(999), ..Default::default() }).await.unwrap();
+    assert_ne!(app.active_chat_id(), Some(999));
+    let c = late_chat(&app);
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c))).await.unwrap();
+    assert_eq!(app.active_chat_id(), Some(999));
+
+    // ...but once the user pressed a key, we don't yank them away.
+    let (mut app, _rx) = setup().await;
+    app.restore(UiState { chat_id: Some(999), ..Default::default() }).await.unwrap();
+    chars(&mut app, "j").await;
+    let before = app.active_chat_id();
+    let c = late_chat(&app);
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c))).await.unwrap();
+    assert_eq!(app.active_chat_id(), before);
+}
+
+#[tokio::test]
+async fn notification_open_jumps_to_chat() {
+    let (mut app, _rx) = setup().await;
+    chars(&mut app, "i").await;
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::OpenChat { chat_id: 4 })).await.unwrap();
+    assert_eq!(app.active_chat_id(), Some(4));
+    assert_eq!(app.mode, AppMode::Normal);
+    assert_eq!(app.active_pane, ActivePane::Messages);
+}

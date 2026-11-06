@@ -42,7 +42,7 @@ pub fn render(
     ]);
 
     let hints = match mode {
-        AppMode::Normal => " j/k: scroll • h/l: switch pane • r: reply • y: copy • o: open • d: delete • i: insert • /: search • ?: help • q: quit",
+        AppMode::Normal => " j/k: scroll • h/l: switch pane • r: reply • y: copy • o: open • d: delete • i: insert • /: search • ?: help • q: quit (service keeps running)",
         AppMode::Insert => " <Esc>: normal mode • <Enter>: send • <C-e>: editor • <C-v>: paste • <C-w>: del word • <C-u>: clear",
         AppMode::FuzzyFind => " Type query to filter • <Enter>: jump • <C-j/k>: navigate • <Esc>: close",
         AppMode::ConfirmDelete => " Delete the selected message? y: confirm • any other key: cancel",

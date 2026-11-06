@@ -1,11 +1,14 @@
 pub mod mock;
 pub mod model;
+pub mod remote;
 pub mod tdlib;
 
 use anyhow::{anyhow, Result};
 use model::{Attachment, Chat, Message};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[derive(Clone, Serialize, Deserialize)]
 pub enum BackendEvent {
     /// A brand-new message (incoming or our own pending one).
     NewMessage(Message),
@@ -25,7 +28,10 @@ pub enum BackendEvent {
     Status(String),
     /// A file requested with `download_file` finished downloading.
     FileDownloaded { file_id: i32, path: PathBuf },
+    /// The user clicked "Open" on a notification for this chat (daemon -> TUI).
+    OpenChat { chat_id: i64 },
     /// An inline image finished decoding (sent by the app's own worker).
+    #[serde(skip)]
     ImageDecoded { file_id: i32, result: std::result::Result<crate::images::DecodedImage, String> },
 }
 
@@ -59,4 +65,25 @@ pub trait TelegramBackend: Send + Sync {
     ) -> Result<()>;
     async fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<()>;
     async fn mark_as_read(&self, chat_id: i64, max_message_id: i64) -> Result<()>;
+    /// The chat the user is looking at in a focused window (None = not
+    /// looking): drives "online" status and notification suppression.
+    async fn set_viewing(&self, _chat_id: Option<i64>) -> Result<()> {
+        Ok(())
+    }
+    /// True if the background service sends desktop notifications, so the
+    /// TUI must not send its own.
+    fn notifies(&self) -> bool {
+        false
+    }
+}
+
+/// Interactive login, shared by the in-process TDLib backend and the
+/// daemon client.
+#[async_trait::async_trait]
+pub trait Auth: Send + Sync {
+    fn auth_watch(&self) -> tokio::sync::watch::Receiver<tdlib::AuthState>;
+    async fn take_error(&self) -> Option<String>;
+    async fn send_phone_number(&self, phone: &str) -> Result<()>;
+    async fn send_auth_code(&self, code: &str) -> Result<()>;
+    async fn send_password(&self, password: &str) -> Result<()>;
 }
