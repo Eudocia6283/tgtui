@@ -31,12 +31,8 @@ pub fn render(
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
 
-    let [prompt_area, sep_area, list_area] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(inner);
+    let [prompt_area, sep_area, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)]).areas(inner);
 
     // Query prompt line with the real terminal cursor at the end.
     let shown_query = tail_fit(query, (prompt_area.width as usize).saturating_sub(3));
@@ -85,7 +81,10 @@ pub fn render(
             if let Some(u) = &chat.username {
                 spans.push(Span::styled(format!("  @{u}"), theme.text_muted));
             }
-            spans.push(Span::styled(format!("  [{:?}]", chat.chat_type), theme.highlight_alt));
+            spans.push(Span::styled(
+                format!("  [{:?}]", chat.chat_type),
+                theme.highlight_alt,
+            ));
             ListItem::new(Line::from(spans)).style(style)
         })
         .collect();

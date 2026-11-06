@@ -103,17 +103,39 @@ pub struct TelegramCredentials {
     pub session_path: String,
 }
 
-fn default_editor() -> String { std::env::var("EDITOR").unwrap_or_else(|_| "nvim".into()) }
-fn default_true() -> bool { true }
-fn default_breakpoint() -> u16 { 80 }
-fn default_ratio() -> u16 { 28 }
-fn default_copy() -> String { "wl-copy".into() }
-fn default_paste() -> String { "wl-paste".into() }
-fn default_viewer() -> String { "imv".into() }
-fn default_open() -> String { "xdg-open".into() }
-fn default_open_tui() -> String { "kitty --class telegram-tui -e {exe} --chat {chat_id}".into() }
-fn default_notify_icon() -> String { "org.telegram.desktop".into() }
-fn default_notify() -> String { "notify-send".into() }
+fn default_editor() -> String {
+    std::env::var("EDITOR").unwrap_or_else(|_| "nvim".into())
+}
+fn default_true() -> bool {
+    true
+}
+fn default_breakpoint() -> u16 {
+    80
+}
+fn default_ratio() -> u16 {
+    28
+}
+fn default_copy() -> String {
+    "wl-copy".into()
+}
+fn default_paste() -> String {
+    "wl-paste".into()
+}
+fn default_viewer() -> String {
+    "imv".into()
+}
+fn default_open() -> String {
+    "xdg-open".into()
+}
+fn default_open_tui() -> String {
+    "kitty --class telegram-tui -e {exe} --chat {chat_id}".into()
+}
+fn default_notify_icon() -> String {
+    "org.telegram.desktop".into()
+}
+fn default_notify() -> String {
+    "notify-send".into()
+}
 fn default_session_path() -> String {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -157,7 +179,6 @@ impl Default for WaylandConfig {
         }
     }
 }
-
 
 impl TelegramCredentials {
     /// `api_id = 0` / empty hash (as in config.example.toml) means "not configured".

@@ -50,17 +50,21 @@ pub fn render(
 
             // Line 1: marker + pin + name ............ muted + time
             let (marker, marker_style, name_style) = if is_selected {
-                (
-                    "❯ ",
-                    theme.accent.add_modifier(Modifier::BOLD),
-                    theme.text_bold,
-                )
+                ("❯ ", theme.accent.add_modifier(Modifier::BOLD), theme.text_bold)
             } else {
                 ("  ", theme.text_muted, theme.text_normal)
             };
             let icons = &theme.icons;
-            let pin_icon = if chat.is_pinned { format!("{} ", icons.pin) } else { String::new() };
-            let mute_icon = if chat.is_muted { format!("{} ", icons.muted) } else { String::new() };
+            let pin_icon = if chat.is_pinned {
+                format!("{} ", icons.pin)
+            } else {
+                String::new()
+            };
+            let mute_icon = if chat.is_muted {
+                format!("{} ", icons.muted)
+            } else {
+                String::new()
+            };
             let max_name = inner_width.saturating_sub(
                 marker.width() + pin_icon.width() + mute_icon.width() + chat.last_message_time.width() + 1,
             );
@@ -83,7 +87,11 @@ pub fn render(
             let max_preview = inner_width.saturating_sub(2 + badge_width);
             let right2 = badge
                 .map(|b| {
-                    let style = if chat.is_muted { theme.text_muted.add_modifier(Modifier::REVERSED) } else { theme.badge_unread };
+                    let style = if chat.is_muted {
+                        theme.text_muted.add_modifier(Modifier::REVERSED)
+                    } else {
+                        theme.badge_unread
+                    };
                     vec![Span::styled(b, style)]
                 })
                 .unwrap_or_default();

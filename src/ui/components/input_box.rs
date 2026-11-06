@@ -54,7 +54,10 @@ pub fn render(
         let max_quote = width.saturating_sub(label.width() + hint.width() + 2);
         lines.push(Line::from(vec![
             Span::styled(label, theme.accent),
-            Span::styled(format!("\"{}\"", truncate_str(quote, max_quote)), theme.reply_quote),
+            Span::styled(
+                format!("\"{}\"", truncate_str(quote, max_quote)),
+                theme.reply_quote,
+            ),
             Span::styled(hint, theme.text_muted),
         ]));
     }
@@ -63,8 +66,16 @@ pub fn render(
         let names: Vec<String> = attachments
             .iter()
             .map(|a| {
-                let icon = if a.kind == MediaKind::Image { theme.icons.image } else { theme.icons.file };
-                let name = a.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let icon = if a.kind == MediaKind::Image {
+                    theme.icons.image
+                } else {
+                    theme.icons.file
+                };
+                let name = a
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 format!("{icon} {name}")
             })
             .collect();
@@ -97,7 +108,10 @@ pub fn render(
         if is_insert {
             let cursor_y = inner.y + lines.len() as u16 - 1;
             if cursor_y < inner.bottom() {
-                f.set_cursor_position(Position::new(cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
+                f.set_cursor_position(Position::new(
+                    cursor_x.min(inner.right().saturating_sub(1)),
+                    cursor_y,
+                ));
             }
         }
     } else {

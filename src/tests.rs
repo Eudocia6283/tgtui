@@ -26,7 +26,11 @@ async fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
 
 async fn chars(app: &mut App, s: &str) {
     for c in s.chars() {
-        let mods = if c.is_uppercase() || "?!G".contains(c) { KeyModifiers::SHIFT } else { KeyModifiers::NONE };
+        let mods = if c.is_uppercase() || "?!G".contains(c) {
+            KeyModifiers::SHIFT
+        } else {
+            KeyModifiers::NONE
+        };
         key(app, KeyCode::Char(c), mods).await;
     }
 }
@@ -112,7 +116,8 @@ async fn long_history_scrolls_to_latest_and_wraps() {
     for i in 1..=40 {
         let mut m = template.clone();
         m.id = base + i;
-        m.text = format!("filler message number {i} with some extra words to force wrapping in a narrow pane");
+        m.text =
+            format!("filler message number {i} with some extra words to force wrapping in a narrow pane");
         app.add_message(m);
     }
     let s = screen(&app, 100, 30);
@@ -138,14 +143,16 @@ async fn compact_mode_and_tiny_terminal_dont_panic() {
     screen(&app, 30, 10);
 }
 
-
 #[tokio::test]
 async fn own_messages_right_others_left_in_bubbles() {
     let (mut app, _rx) = setup().await;
     app.switch_chat(1).await.unwrap();
     let s = screen(&app, 110, 30);
     let col = |needle: &str| {
-        let line = s.lines().find(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle} missing:\n{s}"));
+        let line = s
+            .lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing:\n{s}"));
         // Column in cells (screen() emits one char per cell), not bytes.
         line[..line.find(needle).unwrap()].chars().count()
     };
@@ -154,7 +161,10 @@ async fn own_messages_right_others_left_in_bubbles() {
     // Bubbles have borders with the sender in the top edge.
     assert!(s.contains("╭─ Bob  14:25"), "{s}");
     assert!(s.contains("╭─ 14:26 ✓✓"), "{s}");
-    assert!(s.contains("┃ Alice: Has anyone"), "reply quote inside bubble:\n{s}");
+    assert!(
+        s.contains("┃ Alice: Has anyone"),
+        "reply quote inside bubble:\n{s}"
+    );
 }
 
 #[tokio::test]
@@ -163,8 +173,14 @@ async fn attachments_are_sent_with_caption() {
     let (mut app, mut rx) = setup().await;
     app.switch_chat(1).await.unwrap();
     chars(&mut app, "i").await;
-    app.attachments.push(Attachment { path: "/tmp/shot.png".into(), kind: MediaKind::Image });
-    assert!(screen(&app, 110, 30).contains("shot.png"), "attachment shown in input box");
+    app.attachments.push(Attachment {
+        path: "/tmp/shot.png".into(),
+        kind: MediaKind::Image,
+    });
+    assert!(
+        screen(&app, 110, 30).contains("shot.png"),
+        "attachment shown in input box"
+    );
     chars(&mut app, "look").await;
     key(&mut app, KeyCode::Enter, KeyModifiers::NONE).await;
     pump(&mut app, &mut rx).await;
@@ -173,7 +189,10 @@ async fn attachments_are_sent_with_caption() {
 
     // Esc drops pending attachments.
     chars(&mut app, "i").await;
-    app.attachments.push(Attachment { path: "/tmp/a.pdf".into(), kind: MediaKind::File });
+    app.attachments.push(Attachment {
+        path: "/tmp/a.pdf".into(),
+        kind: MediaKind::File,
+    });
     key(&mut app, KeyCode::Esc, KeyModifiers::NONE).await;
     assert!(app.attachments.is_empty());
 }
@@ -186,7 +205,10 @@ async fn open_media_reports_status() {
     assert_eq!(app.status_msg.as_deref(), Some("Downloading media…"));
     // The background task reports via the event channel.
     loop {
-        let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await.unwrap().unwrap();
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         let is_status = matches!(evt, BackendEvent::Status(_));
         handle_event(&mut app, AppEvent::Backend(evt)).await.unwrap();
         if is_status {
@@ -204,7 +226,9 @@ async fn inline_image_renders_with_kitty_placeholders() {
     app.images.cell_px.set((10, 20));
 
     let path = std::env::temp_dir().join(format!("tgtui-img-{}.png", std::process::id()));
-    image::RgbImage::from_pixel(200, 100, image::Rgb([255, 0, 0])).save(&path).unwrap();
+    image::RgbImage::from_pixel(200, 100, image::Rgb([255, 0, 0]))
+        .save(&path)
+        .unwrap();
 
     app.switch_chat(1).await.unwrap();
     let mut m = app.messages[0].clone();
@@ -213,14 +237,20 @@ async fn inline_image_renders_with_kitty_placeholders() {
     m.media = Some(Media {
         file_id: 50,
         kind: MediaKind::Image,
-        preview: Some(Preview { file_id: 51, local_path: Some(path.clone()) }),
+        preview: Some(Preview {
+            file_id: 51,
+            local_path: Some(path.clone()),
+        }),
     });
     app.add_message(m);
     app.ensure_previews().await;
 
     // Decoding runs on a worker thread and reports back via the channel.
     loop {
-        let evt = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         let done = matches!(evt, BackendEvent::ImageDecoded { .. });
         handle_event(&mut app, AppEvent::Backend(evt)).await.unwrap();
         if done {
@@ -232,7 +262,10 @@ async fn inline_image_renders_with_kitty_placeholders() {
 
     let s = screen(&app, 110, 40);
     // 200x100 px at 10x20 px cells = 20 cols x 5 rows of placeholders.
-    let rows: Vec<&str> = s.lines().filter(|l| l.contains(crate::ui::kitty::PLACEHOLDER)).collect();
+    let rows: Vec<&str> = s
+        .lines()
+        .filter(|l| l.contains(crate::ui::kitty::PLACEHOLDER))
+        .collect();
     assert_eq!(rows.len(), 5, "{s}");
     assert_eq!(rows[0].matches(crate::ui::kitty::PLACEHOLDER).count(), 20);
     // Inside the bubble the image replaces the "[Photo]" label (the chat list keeps it).
@@ -242,7 +275,11 @@ async fn inline_image_renders_with_kitty_placeholders() {
     app.images.flush(&mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert!(out.contains("a=t,f=100"), "image transmitted");
-    assert!(out.contains("a=p,U=1,") && out.contains("c=20,r=5"), "virtual placement: {}", &out[out.len().saturating_sub(80)..]);
+    assert!(
+        out.contains("a=p,U=1,") && out.contains("c=20,r=5"),
+        "virtual placement: {}",
+        &out[out.len().saturating_sub(80)..]
+    );
 
     // Next frame: already transmitted and placed -> nothing to send.
     screen(&app, 110, 40);
@@ -273,7 +310,10 @@ async fn chat_list_has_separators_between_chats() {
         .lines()
         .filter(|l| l.starts_with('│') && l.chars().skip(1).take(28).all(|c| c == '┄'))
         .count();
-    assert_eq!(separators, 5, "6 chats -> 5 separators, none after the last:\n{s}");
+    assert_eq!(
+        separators, 5,
+        "6 chats -> 5 separators, none after the last:\n{s}"
+    );
 }
 
 #[tokio::test]
@@ -282,7 +322,11 @@ async fn ui_uses_no_emoji() {
     let is_emoji = |c: char| matches!(c as u32, 0x1F000..=0x1FFFF | 0x2600..=0x26FF);
     for keys in ["", "/", "\u{1b}?"] {
         for c in keys.chars() {
-            let code = if c == '\u{1b}' { KeyCode::Esc } else { KeyCode::Char(c) };
+            let code = if c == '\u{1b}' {
+                KeyCode::Esc
+            } else {
+                KeyCode::Char(c)
+            };
             key(&mut app, code, KeyModifiers::NONE).await;
         }
         let s = screen(&app, 120, 40);
@@ -296,7 +340,6 @@ async fn ui_uses_no_emoji() {
     assert!(s.contains("\u{f435}") && s.contains("\u{f1f6}"), "{s}");
 }
 
-
 #[tokio::test]
 async fn ticks_switch_from_sent_to_read() {
     let (mut app, mut rx) = setup().await;
@@ -306,13 +349,23 @@ async fn ticks_switch_from_sent_to_read() {
     pump(&mut app, &mut rx).await;
     let last = app.messages.last().unwrap().clone();
     assert!(!last.is_read);
-    let tick_line = |s: &str| s.lines().find(|l| l.contains(&format!("─ {} ", last.time_str)) && l.contains('✓')).map(str::to_string);
+    let tick_line = |s: &str| {
+        s.lines()
+            .find(|l| l.contains(&format!("─ {} ", last.time_str)) && l.contains('✓'))
+            .map(str::to_string)
+    };
     let before = tick_line(&screen(&app, 110, 30)).unwrap();
     assert!(before.contains(" ✓ ") && !before.contains("✓✓"), "{before}");
 
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::OutboxRead { chat_id: last.chat_id, message_id: last.id }))
-        .await
-        .unwrap();
+    handle_event(
+        &mut app,
+        AppEvent::Backend(BackendEvent::OutboxRead {
+            chat_id: last.chat_id,
+            message_id: last.id,
+        }),
+    )
+    .await
+    .unwrap();
     let after = tick_line(&screen(&app, 110, 30)).unwrap();
     assert!(after.contains("✓✓"), "{after}");
 }
@@ -351,19 +404,33 @@ async fn restore_waits_for_late_chat_unless_user_moves_first() {
 
     // TDLib still syncing: the saved chat shows up a moment later.
     let (mut app, _rx) = setup().await;
-    app.restore(UiState { chat_id: Some(999), ..Default::default() }).await.unwrap();
+    app.restore(UiState {
+        chat_id: Some(999),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     assert_ne!(app.active_chat_id(), Some(999));
     let c = late_chat(&app);
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c))).await.unwrap();
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c)))
+        .await
+        .unwrap();
     assert_eq!(app.active_chat_id(), Some(999));
 
     // ...but once the user pressed a key, we don't yank them away.
     let (mut app, _rx) = setup().await;
-    app.restore(UiState { chat_id: Some(999), ..Default::default() }).await.unwrap();
+    app.restore(UiState {
+        chat_id: Some(999),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     chars(&mut app, "j").await;
     let before = app.active_chat_id();
     let c = late_chat(&app);
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c))).await.unwrap();
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c)))
+        .await
+        .unwrap();
     assert_eq!(app.active_chat_id(), before);
 }
 
@@ -371,7 +438,9 @@ async fn restore_waits_for_late_chat_unless_user_moves_first() {
 async fn notification_open_jumps_to_chat() {
     let (mut app, _rx) = setup().await;
     chars(&mut app, "i").await;
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::OpenChat { chat_id: 4 })).await.unwrap();
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::OpenChat { chat_id: 4 }))
+        .await
+        .unwrap();
     assert_eq!(app.active_chat_id(), Some(4));
     assert_eq!(app.mode, AppMode::Normal);
     assert_eq!(app.active_pane, ActivePane::Messages);

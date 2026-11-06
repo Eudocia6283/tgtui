@@ -2,8 +2,8 @@ use crate::backend::model::{Attachment, Chat, MediaKind, Message};
 use crate::backend::{BackendEvent, TelegramBackend};
 use crate::config::Config;
 use crate::images::{self, ImageStore, Need};
-use crate::state::{self, UiState};
 use crate::mode::AppMode;
+use crate::state::{self, UiState};
 use crate::ui::theme::Theme;
 use anyhow::{anyhow, Context, Result};
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -408,7 +408,11 @@ impl App {
         if Some(chat_id) != self.active_chat_id() {
             return;
         }
-        for m in self.messages.iter_mut().filter(|m| m.is_outgoing && m.id <= up_to) {
+        for m in self
+            .messages
+            .iter_mut()
+            .filter(|m| m.is_outgoing && m.id <= up_to)
+        {
             m.is_read = true;
         }
     }
@@ -469,14 +473,19 @@ impl App {
         };
         // The backend broadcasts BackendEvent::NewMessage; don't push here.
         let result = if self.attachments.is_empty() {
-            self.backend.send_message(chat_id, text, self.reply_target_id).await
+            self.backend
+                .send_message(chat_id, text, self.reply_target_id)
+                .await
         } else {
             // The text becomes the caption of the first file.
             let mut caption = text;
             let mut result = Ok(());
             for file in std::mem::take(&mut self.attachments) {
                 let reply_to = self.reply_target_id;
-                result = self.backend.send_file(chat_id, file, std::mem::take(&mut caption), reply_to).await;
+                result = self
+                    .backend
+                    .send_file(chat_id, file, std::mem::take(&mut caption), reply_to)
+                    .await;
                 if result.is_err() {
                     break;
                 }
@@ -576,7 +585,12 @@ impl App {
         let Some(msg) = self.messages.get(self.selected_msg_idx) else {
             return;
         };
-        let text = if msg.media.is_some() { strip_media_label(&msg.text) } else { msg.text.as_str() }.to_string();
+        let text = if msg.media.is_some() {
+            strip_media_label(&msg.text)
+        } else {
+            msg.text.as_str()
+        }
+        .to_string();
         if text.is_empty() {
             self.set_status("Nothing to yank: message has no text");
             return;
@@ -605,7 +619,11 @@ impl App {
     fn read_clipboard(&self) -> Result<Pasted> {
         let paste = &self.config.wayland.paste_command;
         let types = run_capture(paste, &["--list-types"]).unwrap_or_default();
-        let types: Vec<&str> = std::str::from_utf8(&types).unwrap_or("").lines().map(str::trim).collect();
+        let types: Vec<&str> = std::str::from_utf8(&types)
+            .unwrap_or("")
+            .lines()
+            .map(str::trim)
+            .collect();
 
         // Files copied in a file manager.
         if types.contains(&"text/uri-list") {
@@ -615,7 +633,10 @@ impl App {
                 .filter_map(|l| l.trim().strip_prefix("file://").map(percent_decode))
                 .map(PathBuf::from)
                 .filter(|p| p.is_file())
-                .map(|path| Attachment { kind: media_kind_for(&path), path })
+                .map(|path| Attachment {
+                    kind: media_kind_for(&path),
+                    path,
+                })
                 .collect();
             if !files.is_empty() {
                 return Ok(Pasted::Files(files));
@@ -634,7 +655,11 @@ impl App {
             let path = paste_cache_file(ext)?;
             std::fs::write(&path, data)?;
             // GIFs are sent as documents so they keep their animation.
-            let kind = if *ext == "gif" { MediaKind::File } else { MediaKind::Image };
+            let kind = if *ext == "gif" {
+                MediaKind::File
+            } else {
+                MediaKind::Image
+            };
             return Ok(Pasted::Files(vec![Attachment { path, kind }]));
         }
 
@@ -646,7 +671,11 @@ impl App {
     /// Download (if needed) and open the selected message's media in the
     /// background; the result is reported through the status bar.
     pub fn open_selected_media(&mut self) {
-        let Some(media) = self.messages.get(self.selected_msg_idx).and_then(|m| m.media.clone()) else {
+        let Some(media) = self
+            .messages
+            .get(self.selected_msg_idx)
+            .and_then(|m| m.media.clone())
+        else {
             self.set_status("Selected message has no media");
             return;
         };
@@ -761,7 +790,11 @@ pub fn spawn_command(line: &str, extra_args: &[String], stdin: Option<Vec<u8>>) 
     let mut child = Command::new(program)
         .args(args)
         .args(extra_args)
-        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
@@ -795,19 +828,30 @@ fn clipboard_payload(path: &Path, kind: MediaKind) -> Result<ClipboardPayload> {
         if let Ok(img) = image::open(path) {
             let mut data = Vec::new();
             img.write_to(&mut std::io::Cursor::new(&mut data), image::ImageFormat::Png)?;
-            return Ok(ClipboardPayload { mime: "image/png", data, what: "image" });
+            return Ok(ClipboardPayload {
+                mime: "image/png",
+                data,
+                what: "image",
+            });
         }
     }
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let uri = format!("file://{}\r\n", percent_encode(&path.to_string_lossy()));
-    Ok(ClipboardPayload { mime: "text/uri-list", data: uri.into_bytes(), what: "file" })
+    Ok(ClipboardPayload {
+        mime: "text/uri-list",
+        data: uri.into_bytes(),
+        what: "file",
+    })
 }
 
 /// Pipe `data` into the copy command, telling it the MIME type when we
 /// know how (wl-copy / xclip); other commands just get the bytes.
 fn copy_to_clipboard(line: &str, mime: &str, data: Vec<u8>) -> Result<()> {
     let (program, _) = split_command(line)?;
-    let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or(program);
+    let name = Path::new(program)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(program);
     let type_args: Vec<String> = match name {
         "wl-copy" => vec!["--type".into(), mime.into()],
         "xclip" => vec!["-t".into(), mime.into()],
@@ -964,9 +1008,8 @@ mod tests {
         let file = d.0.join("my report.pdf");
         std::fs::write(&file, "x").unwrap();
         let uri = format!("file://{}", file.to_string_lossy().replace(' ', "%20"));
-        let script = format!(
-            r#"case "$1" in --list-types) echo text/uri-list;; --type) echo '{uri}';; esac"#
-        );
+        let script =
+            format!(r#"case "$1" in --list-types) echo text/uri-list;; --type) echo '{uri}';; esac"#);
         std::fs::write(d.0.join("fake-paste"), format!("#!/bin/sh\n{script}\n")).unwrap();
         app.paste_from_clipboard();
         assert_eq!(app.attachments.len(), 1, "{:?}", app.status_msg);
@@ -994,7 +1037,9 @@ mod tests {
     fn clipboard_payload_for_image_and_file() {
         let d = tempdir::Dir::new();
         let jpg = d.0.join("photo.jpg");
-        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3])).save(&jpg).unwrap();
+        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
+            .save(&jpg)
+            .unwrap();
         let p = clipboard_payload(&jpg, MediaKind::Image).unwrap();
         assert_eq!(p.mime, "image/png");
         let png = image::load_from_memory(&p.data).unwrap();
@@ -1005,12 +1050,18 @@ mod tests {
         let p = clipboard_payload(&doc, MediaKind::File).unwrap();
         assert_eq!(p.mime, "text/uri-list");
         let uri = String::from_utf8(p.data).unwrap();
-        assert!(uri.starts_with("file:///") && uri.ends_with("a%20b.pdf\r\n"), "{uri}");
+        assert!(
+            uri.starts_with("file:///") && uri.ends_with("a%20b.pdf\r\n"),
+            "{uri}"
+        );
 
         // An "image" that can't be decoded is still yanked, as a file.
         let bogus = d.0.join("x.webm");
         std::fs::write(&bogus, "not an image").unwrap();
-        assert_eq!(clipboard_payload(&bogus, MediaKind::Image).unwrap().mime, "text/uri-list");
+        assert_eq!(
+            clipboard_payload(&bogus, MediaKind::Image).unwrap().mime,
+            "text/uri-list"
+        );
     }
 
     #[test]
@@ -1018,7 +1069,14 @@ mod tests {
         let d = tempdir::Dir::new();
         let bin = d.0.join("wl-copy");
         let log = d.0.join("log");
-        std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" > {0}.args\ncat > {0}.data\n", log.display())).unwrap();
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\necho \"$@\" > {0}.args\ncat > {0}.data\n",
+                log.display()
+            ),
+        )
+        .unwrap();
         std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         // The program must be named wl-copy, so retry the rare ETXTBSY race.
         let mut spawned = copy_to_clipboard(&bin.to_string_lossy(), "image/png", b"DATA".to_vec());

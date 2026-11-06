@@ -31,11 +31,9 @@ pub fn render(f: &mut Frame, app: &App) {
     } else {
         // Dual Column Standard Mode
         let ratio = app.config.ui.chats_ratio_percent;
-        let [left, right] = Layout::horizontal([
-            Constraint::Percentage(ratio),
-            Constraint::Percentage(100 - ratio),
-        ])
-        .areas(content_area);
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(ratio), Constraint::Percentage(100 - ratio)])
+                .areas(content_area);
         (Some(left), Some(right))
     };
 
@@ -52,12 +50,22 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     if let Some(area) = messages_area {
-        render_messages_pane(f, area, app, is_compact || app.active_pane == ActivePane::Messages);
+        render_messages_pane(
+            f,
+            area,
+            app,
+            is_compact || app.active_pane == ActivePane::Messages,
+        );
     }
 
     let active_title = app.active_chat().map(|c| c.title.as_str());
     // Like other clients, muted chats don't count towards the total.
-    let unread_total = app.chats.iter().filter(|c| !c.is_muted).map(|c| c.unread_count).sum();
+    let unread_total = app
+        .chats
+        .iter()
+        .filter(|c| !c.is_muted)
+        .map(|c| c.unread_count)
+        .sum();
     components::status_bar::render(
         f,
         status_area,
@@ -95,7 +103,10 @@ pub fn render(f: &mut Frame, app: &App) {
 fn render_messages_pane(f: &mut Frame, area: Rect, app: &App, focused: bool) {
     let [messages_area, input_area] = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(components::input_box::height(app.replying_to.is_some(), app.attachments.len())),
+        Constraint::Length(components::input_box::height(
+            app.replying_to.is_some(),
+            app.attachments.len(),
+        )),
     ])
     .areas(area);
 

@@ -64,7 +64,12 @@ impl RemoteBackend {
             next_id: AtomicU64::new(1),
             auth_rx,
         });
-        match backend.call(Op::Hello { version: ipc::PROTOCOL_VERSION }).await {
+        match backend
+            .call(Op::Hello {
+                version: ipc::PROTOCOL_VERSION,
+            })
+            .await
+        {
             Ok(_) => Ok(backend),
             Err(e) => bail!("service rejected connection: {e} (restart it with `telegram-tui daemon stop`)"),
         }
@@ -73,7 +78,10 @@ impl RemoteBackend {
     async fn call(&self, op: Op) -> Result<Reply> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(id, tx);
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, tx);
         ipc::write_msg(&mut *self.writer.lock().await, &Request { id, op }).await?;
         rx.await
             .map_err(|_| anyhow!("background service disconnected"))?
@@ -102,7 +110,11 @@ impl TelegramBackend for RemoteBackend {
     }
 
     async fn load_older(&self, chat_id: i64, from_message_id: i64) -> Result<()> {
-        self.unit(Op::LoadOlder { chat_id, from_message_id }).await
+        self.unit(Op::LoadOlder {
+            chat_id,
+            from_message_id,
+        })
+        .await
     }
 
     async fn download_media(&self, file_id: i32) -> Result<PathBuf> {
@@ -117,11 +129,28 @@ impl TelegramBackend for RemoteBackend {
     }
 
     async fn send_message(&self, chat_id: i64, text: String, reply_to_id: Option<i64>) -> Result<()> {
-        self.unit(Op::SendMessage { chat_id, text, reply_to_id }).await
+        self.unit(Op::SendMessage {
+            chat_id,
+            text,
+            reply_to_id,
+        })
+        .await
     }
 
-    async fn send_file(&self, chat_id: i64, file: Attachment, caption: String, reply_to_id: Option<i64>) -> Result<()> {
-        self.unit(Op::SendFile { chat_id, file, caption, reply_to_id }).await
+    async fn send_file(
+        &self,
+        chat_id: i64,
+        file: Attachment,
+        caption: String,
+        reply_to_id: Option<i64>,
+    ) -> Result<()> {
+        self.unit(Op::SendFile {
+            chat_id,
+            file,
+            caption,
+            reply_to_id,
+        })
+        .await
     }
 
     async fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<()> {
@@ -129,7 +158,11 @@ impl TelegramBackend for RemoteBackend {
     }
 
     async fn mark_as_read(&self, chat_id: i64, max_message_id: i64) -> Result<()> {
-        self.unit(Op::MarkAsRead { chat_id, max_message_id }).await
+        self.unit(Op::MarkAsRead {
+            chat_id,
+            max_message_id,
+        })
+        .await
     }
 
     async fn set_viewing(&self, chat_id: Option<i64>) -> Result<()> {

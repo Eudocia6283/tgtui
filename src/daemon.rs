@@ -1,13 +1,13 @@
 //! Background service: owns the TDLib client, serves TUI clients over a Unix
 //! socket and sends desktop notifications while no TUI is looking.
 
-use crate::backend::model::Chat;
 use crate::backend::mock::MockBackend;
+use crate::backend::model::Chat;
 use crate::backend::tdlib::{AuthState, TdlibBackend};
 use crate::backend::{Auth, BackendEvent, TelegramBackend};
 use crate::config::Config;
 use crate::ipc::{self, Op, Reply, Request, ServerMsg};
-use crate::notify::{NotifyAction, Notifier};
+use crate::notify::{Notifier, NotifyAction};
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -22,10 +22,22 @@ const NOTIFY_MAX_AGE_SECS: i64 = 120;
 
 /// Control messages from client tasks to the main loop.
 enum Ctl {
-    Connected { id: u64, tx: mpsc::UnboundedSender<ServerMsg>, pid: Option<u32> },
-    Disconnected { id: u64 },
-    Viewing { id: u64, chat_id: Option<i64> },
-    Status { id: u64, reply: oneshot::Sender<Reply> },
+    Connected {
+        id: u64,
+        tx: mpsc::UnboundedSender<ServerMsg>,
+        pid: Option<u32>,
+    },
+    Disconnected {
+        id: u64,
+    },
+    Viewing {
+        id: u64,
+        chat_id: Option<i64>,
+    },
+    Status {
+        id: u64,
+        reply: oneshot::Sender<Reply>,
+    },
     Shutdown,
 }
 
@@ -66,14 +78,26 @@ pub async fn run(config: Config) -> Result<()> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let backend = TdlibBackend::new(tg.api_id, tg.api_hash.clone(), tg.session_dir(), event_tx)?;
 
-    let listener = UnixListener::bind(&path).with_context(|| format!("can't listen on {}", path.display()))?;
+    let listener =
+        UnixListener::bind(&path).with_context(|| format!("can't listen on {}", path.display()))?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    eprintln!("[daemon] pid {} listening on {}", std::process::id(), path.display());
+    eprintln!(
+        "[daemon] pid {} listening on {}",
+        std::process::id(),
+        path.display()
+    );
 
     let (action_tx, action_rx) = mpsc::unbounded_channel();
     let notifier = Notifier::new(&config, action_tx).await;
 
-    let result = serve(backend.clone(), listener, event_rx, Some((notifier, action_rx)), config).await;
+    let result = serve(
+        backend.clone(),
+        listener,
+        event_rx,
+        Some((notifier, action_rx)),
+        config,
+    )
+    .await;
     eprintln!("[daemon] shutting down");
     let _ = std::fs::remove_file(&path);
     backend.shutdown();
@@ -205,7 +229,9 @@ async fn on_event(
             }
         }
         BackendEvent::NewMessage(msg) => {
-            let Some(chat) = chats.get(&msg.chat_id) else { return };
+            let Some(chat) = chats.get(&msg.chat_id) else {
+                return;
+            };
             let fresh = chrono::Utc::now().timestamp() - msg.date <= NOTIFY_MAX_AGE_SECS;
             let looking = clients.values().any(|c| c.viewing == Some(msg.chat_id));
             if !msg.is_outgoing && !chat.is_muted && fresh && !looking {
@@ -227,7 +253,9 @@ async fn on_action(
         NotifyAction::Open { chat_id, token } => {
             // Prefer an open TUI (the most recently connected one).
             if let Some((_, client)) = clients.iter().max_by_key(|(id, _)| **id) {
-                let _ = client.tx.send(ServerMsg::Event(BackendEvent::OpenChat { chat_id }));
+                let _ = client
+                    .tx
+                    .send(ServerMsg::Event(BackendEvent::OpenChat { chat_id }));
                 if config.daemon.focus_window {
                     if let Some(pid) = client.pid {
                         focus_niri_window_of(pid).await;
@@ -237,11 +265,18 @@ async fn on_action(
                 open_tui(config, chat_id, token);
             }
         }
-        NotifyAction::MarkRead { chat_id, last_message_id } => {
+        NotifyAction::MarkRead {
+            chat_id,
+            last_message_id,
+        } => {
             let _ = backend.mark_as_read(chat_id, last_message_id).await;
             notifier.clear(chat_id).await;
         }
-        NotifyAction::Reply { chat_id, last_message_id, text } => {
+        NotifyAction::Reply {
+            chat_id,
+            last_message_id,
+            text,
+        } => {
             if let Err(e) = backend.send_message(chat_id, text, None).await {
                 eprintln!("[daemon] reply failed: {e}");
             }
@@ -254,7 +289,9 @@ async fn on_action(
 
 /// Launch a terminal with the TUI on `chat_id` (no TUI is connected).
 fn open_tui(config: &Config, chat_id: i64, token: Option<String>) {
-    let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "telegram-tui".into());
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "telegram-tui".into());
     let line = config
         .daemon
         .open_command
@@ -285,16 +322,20 @@ async fn focus_niri_window_of(pid: u32) {
     if std::env::var_os("NIRI_SOCKET").is_none() {
         return;
     }
-    let Ok(out) = tokio::process::Command::new("niri").args(["msg", "--json", "windows"]).output().await else {
+    let Ok(out) = tokio::process::Command::new("niri")
+        .args(["msg", "--json", "windows"])
+        .output()
+        .await
+    else {
         return;
     };
     let Ok(windows) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else {
         return;
     };
     let ancestors = ancestors_of(pid);
-    let window = windows.iter().find(|w| {
-        w["pid"].as_u64().is_some_and(|p| ancestors.contains(&(p as u32)))
-    });
+    let window = windows
+        .iter()
+        .find(|w| w["pid"].as_u64().is_some_and(|p| ancestors.contains(&(p as u32))));
     if let Some(id) = window.and_then(|w| w["id"].as_u64()) {
         let _ = tokio::process::Command::new("niri")
             .args(["msg", "action", "focus-window", "--id", &id.to_string()])
@@ -307,7 +348,9 @@ fn ancestors_of(mut pid: u32) -> Vec<u32> {
     let mut out = Vec::new();
     while pid > 1 && out.len() < 64 {
         out.push(pid);
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { break };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            break;
+        };
         // Field 4 (ppid) comes after the parenthesised command name.
         let ppid = stat
             .rsplit_once(')')
@@ -321,7 +364,12 @@ fn ancestors_of(mut pid: u32) -> Vec<u32> {
     out
 }
 
-async fn serve_client(id: u64, stream: UnixStream, backend: Arc<dyn ServiceBackend>, ctl: mpsc::UnboundedSender<Ctl>) {
+async fn serve_client(
+    id: u64,
+    stream: UnixStream,
+    backend: Arc<dyn ServiceBackend>,
+    ctl: mpsc::UnboundedSender<Ctl>,
+) {
     let pid = stream.peer_cred().ok().and_then(|c| c.pid()).map(|p| p as u32);
     let (read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
@@ -334,7 +382,11 @@ async fn serve_client(id: u64, stream: UnixStream, backend: Arc<dyn ServiceBacke
         }
     });
 
-    let _ = ctl.send(Ctl::Connected { id, tx: tx.clone(), pid });
+    let _ = ctl.send(Ctl::Connected {
+        id,
+        tx: tx.clone(),
+        pid,
+    });
     let mut reader = ipc::reader(read);
     while let Ok(Some(req)) = ipc::read_msg::<Request>(&mut reader).await {
         let backend = backend.clone();
@@ -342,7 +394,9 @@ async fn serve_client(id: u64, stream: UnixStream, backend: Arc<dyn ServiceBacke
         let ctl = ctl.clone();
         // Run each request on its own task: downloads can take a while.
         tokio::spawn(async move {
-            let result = handle(id, req.op, &backend, &ctl).await.map_err(|e| format!("{e:#}"));
+            let result = handle(id, req.op, &backend, &ctl)
+                .await
+                .map_err(|e| format!("{e:#}"));
             let _ = tx.send(ServerMsg::Response { id: req.id, result });
         });
     }
@@ -351,7 +405,12 @@ async fn serve_client(id: u64, stream: UnixStream, backend: Arc<dyn ServiceBacke
     let _ = writer.await;
 }
 
-async fn handle(client: u64, op: Op, b: &Arc<dyn ServiceBackend>, ctl: &mpsc::UnboundedSender<Ctl>) -> Result<Reply> {
+async fn handle(
+    client: u64,
+    op: Op,
+    b: &Arc<dyn ServiceBackend>,
+    ctl: &mpsc::UnboundedSender<Ctl>,
+) -> Result<Reply> {
     Ok(match op {
         Op::Hello { version } => {
             if version != ipc::PROTOCOL_VERSION {
@@ -361,7 +420,10 @@ async fn handle(client: u64, op: Op, b: &Arc<dyn ServiceBackend>, ctl: &mpsc::Un
         }
         Op::GetChats => Reply::Chats(b.get_chats().await?),
         Op::GetMessages { chat_id, limit } => Reply::Messages(b.get_messages(chat_id, limit).await?),
-        Op::LoadOlder { chat_id, from_message_id } => {
+        Op::LoadOlder {
+            chat_id,
+            from_message_id,
+        } => {
             b.load_older(chat_id, from_message_id).await?;
             Reply::Unit
         }
@@ -370,11 +432,20 @@ async fn handle(client: u64, op: Op, b: &Arc<dyn ServiceBackend>, ctl: &mpsc::Un
             b.download_file(file_id).await?;
             Reply::Unit
         }
-        Op::SendMessage { chat_id, text, reply_to_id } => {
+        Op::SendMessage {
+            chat_id,
+            text,
+            reply_to_id,
+        } => {
             b.send_message(chat_id, text, reply_to_id).await?;
             Reply::Unit
         }
-        Op::SendFile { chat_id, file, caption, reply_to_id } => {
+        Op::SendFile {
+            chat_id,
+            file,
+            caption,
+            reply_to_id,
+        } => {
             b.send_file(chat_id, file, caption, reply_to_id).await?;
             Reply::Unit
         }
@@ -382,7 +453,10 @@ async fn handle(client: u64, op: Op, b: &Arc<dyn ServiceBackend>, ctl: &mpsc::Un
             b.delete_message(chat_id, message_id).await?;
             Reply::Unit
         }
-        Op::MarkAsRead { chat_id, max_message_id } => {
+        Op::MarkAsRead {
+            chat_id,
+            max_message_id,
+        } => {
             b.mark_as_read(chat_id, max_message_id).await?;
             Reply::Unit
         }
@@ -405,7 +479,10 @@ async fn handle(client: u64, op: Op, b: &Arc<dyn ServiceBackend>, ctl: &mpsc::Un
         Op::TakeError => Reply::Error(b.take_error().await),
         Op::Status => {
             let (tx, rx) = oneshot::channel();
-            let _ = ctl.send(Ctl::Status { id: client, reply: tx });
+            let _ = ctl.send(Ctl::Status {
+                id: client,
+                reply: tx,
+            });
             rx.await?
         }
         Op::Shutdown => {
@@ -451,9 +528,15 @@ mod tests {
     use crate::backend::remote::RemoteBackend;
     use std::time::Duration;
 
-    async fn next_event(rx: &mut mpsc::UnboundedReceiver<BackendEvent>, pred: impl Fn(&BackendEvent) -> bool) -> BackendEvent {
+    async fn next_event(
+        rx: &mut mpsc::UnboundedReceiver<BackendEvent>,
+        pred: impl Fn(&BackendEvent) -> bool,
+    ) -> BackendEvent {
         loop {
-            let evt = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("timed out").expect("closed");
+            let evt = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("timed out")
+                .expect("closed");
             if pred(&evt) {
                 return evt;
             }
@@ -467,7 +550,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("calls");
         let script = dir.join("fake-notify");
-        std::fs::write(&script, format!("#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$2\" >> {}\n", log.display())).unwrap();
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$2\" >> {}\n",
+                log.display()
+            ),
+        )
+        .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut config = Config::default();
         // Run through sh: exec'ing a just-written file can race with forks
@@ -476,22 +566,56 @@ mod tests {
         let mut notifier = Notifier::offline(&config);
 
         let chat = |id: i64, title: &str, muted: bool| Chat {
-            id, title: title.into(), username: None, chat_type: ChatType::Group, unread_count: 1,
-            is_pinned: false, is_muted: muted, last_message_preview: String::new(),
-            last_message_time: String::new(), members_count: None, order: 1,
+            id,
+            title: title.into(),
+            username: None,
+            chat_type: ChatType::Group,
+            unread_count: 1,
+            is_pinned: false,
+            is_muted: muted,
+            last_message_preview: String::new(),
+            last_message_time: String::new(),
+            members_count: None,
+            order: 1,
         };
         let now = chrono::Utc::now().timestamp();
         let msg = |chat_id: i64, id: i64, outgoing: bool, date: i64| Message {
-            id, chat_id, sender_name: "Bob".into(), text: format!("m{id}"), date, time_str: String::new(),
-            is_outgoing: outgoing, is_read: true, reply_to: None, media: None, send_state: SendState::Sent,
+            id,
+            chat_id,
+            sender_name: "Bob".into(),
+            text: format!("m{id}"),
+            date,
+            time_str: String::new(),
+            is_outgoing: outgoing,
+            is_read: true,
+            reply_to: None,
+            media: None,
+            send_state: SendState::Sent,
         };
 
         let mut chats = HashMap::new();
         let mut clients = HashMap::new();
         let (tx, _rx) = mpsc::unbounded_channel();
-        clients.insert(1, Client { tx, viewing: Some(3), pid: None });
-        for c in [chat(2, "Arch", false), chat(3, "Watched", false), chat(5, "Muted", true)] {
-            on_event(&BackendEvent::ChatUpdated(c), &mut chats, &clients, Some(&mut notifier)).await;
+        clients.insert(
+            1,
+            Client {
+                tx,
+                viewing: Some(3),
+                pid: None,
+            },
+        );
+        for c in [
+            chat(2, "Arch", false),
+            chat(3, "Watched", false),
+            chat(5, "Muted", true),
+        ] {
+            on_event(
+                &BackendEvent::ChatUpdated(c),
+                &mut chats,
+                &clients,
+                Some(&mut notifier),
+            )
+            .await;
         }
         for (m, should) in [
             (msg(2, 1, false, now), true),         // fresh incoming
@@ -503,7 +627,13 @@ mod tests {
             (msg(9, 7, false, now), false),        // unknown chat
         ] {
             let before = std::fs::read_to_string(&log).unwrap_or_default().lines().count();
-            on_event(&BackendEvent::NewMessage(m.clone()), &mut chats, &clients, Some(&mut notifier)).await;
+            on_event(
+                &BackendEvent::NewMessage(m.clone()),
+                &mut chats,
+                &clients,
+                Some(&mut notifier),
+            )
+            .await;
             // The fallback command runs asynchronously.
             let mut after = before;
             for _ in 0..50 {
@@ -521,7 +651,10 @@ mod tests {
         }
         // The second message updates the same notification: count + both lines.
         let calls = std::fs::read_to_string(&log).unwrap();
-        assert!(calls.starts_with("Arch|Bob: m1\nArch (2 new)|Bob: m1\nBob: m2\n"), "{calls}");
+        assert!(
+            calls.starts_with("Arch|Bob: m1\nArch (2 new)|Bob: m1\nBob: m2\n"),
+            "{calls}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -545,7 +678,10 @@ mod tests {
 
         // Login state is pushed on connect.
         let mut auth = a.auth_watch();
-        tokio::time::timeout(Duration::from_secs(5), auth.wait_for(|s| *s == AuthState::Ready)).await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), auth.wait_for(|s| *s == AuthState::Ready))
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(a.get_chats().await.unwrap().len(), 6);
         assert_eq!(a.get_messages(2, 50).await.unwrap().len(), 5);
@@ -555,12 +691,19 @@ mod tests {
         a.send_message(2, "over the socket".into(), None).await.unwrap();
         for rx in [&mut rx1, &mut rx2] {
             let evt = next_event(rx, |e| matches!(e, BackendEvent::NewMessage(_))).await;
-            let BackendEvent::NewMessage(m) = evt else { unreachable!() };
+            let BackendEvent::NewMessage(m) = evt else {
+                unreachable!()
+            };
             assert_eq!(m.text, "over the socket");
         }
 
         // Errors from the backend come back as Err.
-        assert!(b.download_media(1).await.unwrap_err().to_string().contains("demo mode"));
+        assert!(b
+            .download_media(1)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("demo mode"));
 
         b.set_viewing(Some(2)).await.unwrap();
         match crate::backend::remote::query_status(&sock).await.unwrap() {
@@ -573,7 +716,11 @@ mod tests {
 
         // Shutdown stops the loop; clients notice.
         crate::backend::remote::request_shutdown(&sock).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(5), service).await.unwrap().unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), service)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
         drop((a, b));
         let _ = std::fs::remove_dir_all(&dir);
     }

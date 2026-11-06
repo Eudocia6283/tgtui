@@ -32,7 +32,11 @@ pub fn decode(path: &Path) -> Result<DecodedImage, String> {
     let mut png = Vec::new();
     img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
-    Ok(DecodedImage { png, width: img.width(), height: img.height() })
+    Ok(DecodedImage {
+        png,
+        width: img.width(),
+        height: img.height(),
+    })
 }
 
 struct Ready {
@@ -111,7 +115,12 @@ impl ImageStore {
             Ok(image) => {
                 let kitty_id = self.next_id;
                 self.next_id = (self.next_id + 1) & 0xFF_FFFF;
-                Entry::Ready(Ready { kitty_id, image, transmitted: false, placed: None })
+                Entry::Ready(Ready {
+                    kitty_id,
+                    image,
+                    transmitted: false,
+                    placed: None,
+                })
             }
             Err(e) => {
                 log::warn!("failed to decode preview {file_id}: {e}");
@@ -142,7 +151,9 @@ impl ImageStore {
         }
         for entry in self.entries.values_mut() {
             let Entry::Ready(r) = entry else { continue };
-            let Some(&(cols, rows)) = wanted.get(&r.kitty_id) else { continue };
+            let Some(&(cols, rows)) = wanted.get(&r.kitty_id) else {
+                continue;
+            };
             if !r.transmitted {
                 kitty::transmit_png(out, r.kitty_id, &r.image.png)?;
                 r.transmitted = true;

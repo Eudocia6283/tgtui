@@ -55,11 +55,23 @@ trait Notifications {
 pub enum NotifyAction {
     /// Clicked the notification / "Open". `token` is an xdg-activation
     /// token for focusing the window we open.
-    Open { chat_id: i64, token: Option<String> },
-    MarkRead { chat_id: i64, last_message_id: i64 },
-    Reply { chat_id: i64, last_message_id: i64, text: String },
+    Open {
+        chat_id: i64,
+        token: Option<String>,
+    },
+    MarkRead {
+        chat_id: i64,
+        last_message_id: i64,
+    },
+    Reply {
+        chat_id: i64,
+        last_message_id: i64,
+        text: String,
+    },
     /// Dismissed (or expired) on the notification server's side.
-    Closed { chat_id: i64 },
+    Closed {
+        chat_id: i64,
+    },
 }
 
 struct ChatNote {
@@ -102,7 +114,8 @@ impl Notifier {
             Ok(proxy) => {
                 let caps = proxy.get_capabilities().await.unwrap_or_default();
                 notifier.actions = caps.iter().any(|c| c == "actions");
-                notifier.inline_reply = config.daemon.inline_reply && caps.iter().any(|c| c == "inline-reply");
+                notifier.inline_reply =
+                    config.daemon.inline_reply && caps.iter().any(|c| c == "inline-reply");
                 eprintln!(
                     "[daemon] notifications via D-Bus (actions: {}, inline reply: {})",
                     notifier.actions, notifier.inline_reply
@@ -112,7 +125,10 @@ impl Notifier {
                 }
                 notifier.proxy = Some(proxy);
             }
-            Err(e) => eprintln!("[daemon] D-Bus notifications unavailable ({e}); using `{}`", notifier.fallback_command),
+            Err(e) => eprintln!(
+                "[daemon] D-Bus notifications unavailable ({e}); using `{}`",
+                notifier.fallback_command
+            ),
         }
         notifier
     }
@@ -220,7 +236,14 @@ impl Notifier {
 
         let mut actions: Vec<&str> = Vec::new();
         if self.actions {
-            actions.extend(["default", "Open", "open", "Open chat", "mark-read", "Mark as read"]);
+            actions.extend([
+                "default",
+                "Open",
+                "open",
+                "Open chat",
+                "mark-read",
+                "Mark as read",
+            ]);
         }
         let placeholder = format!("Reply to {}…", chat.title);
         let mut hints: HashMap<&str, Value> = HashMap::new();
@@ -232,7 +255,9 @@ impl Notifier {
         }
 
         match proxy
-            .notify("Telegram", note.id, &self.icon, &summary, &body, &actions, hints, -1)
+            .notify(
+                "Telegram", note.id, &self.icon, &summary, &body, &actions, hints, -1,
+            )
             .await
         {
             Ok(id) => {
@@ -279,14 +304,29 @@ mod tests {
         let proxy = n.proxy.clone().expect("D-Bus notification server");
         assert!(n.actions, "server supports actions");
         let chat = Chat {
-            id: -1, title: "telegram-tui test".into(), username: None, chat_type: ChatType::Direct,
-            unread_count: 1, is_pinned: false, is_muted: false, last_message_preview: String::new(),
-            last_message_time: String::new(), members_count: None, order: 1,
+            id: -1,
+            title: "telegram-tui test".into(),
+            username: None,
+            chat_type: ChatType::Direct,
+            unread_count: 1,
+            is_pinned: false,
+            is_muted: false,
+            last_message_preview: String::new(),
+            last_message_time: String::new(),
+            members_count: None,
+            order: 1,
         };
         let msg = Message {
-            id: 1, chat_id: -1, sender_name: "test".into(),
-            text: "Background service notification check (closes in 8s)".into(), date: 0,
-            time_str: String::new(), is_outgoing: false, is_read: false, reply_to: None, media: None,
+            id: 1,
+            chat_id: -1,
+            sender_name: "test".into(),
+            text: "Background service notification check (closes in 8s)".into(),
+            date: 0,
+            time_str: String::new(),
+            is_outgoing: false,
+            is_read: false,
+            reply_to: None,
+            media: None,
             send_state: SendState::Sent,
         };
         n.message(&chat, &msg).await;

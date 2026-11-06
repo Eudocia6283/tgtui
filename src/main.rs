@@ -132,7 +132,12 @@ fn parse_args() -> Result<Option<Args>> {
 fn setup_terminal(mouse: bool) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste, EnableFocusChange)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableFocusChange
+    )?;
     if mouse {
         execute!(stdout, EnableMouseCapture)?;
     }
@@ -209,7 +214,15 @@ async fn main() -> Result<()> {
     setup_terminal(config.general.enable_mouse)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
-    let result = run(&mut terminal, telegram_backend, config, args.chat, backend_tx, backend_rx).await;
+    let result = run(
+        &mut terminal,
+        telegram_backend,
+        config,
+        args.chat,
+        backend_tx,
+        backend_rx,
+    )
+    .await;
 
     // 4. Graceful Teardown
     restore_terminal()?;
@@ -257,7 +270,10 @@ async fn connect_service(
     if let Some(dir) = log_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
     let mut cmd = std::process::Command::new(std::env::current_exe()?);
     cmd.arg("daemon");
     if let Some(p) = config_path {
@@ -467,11 +483,13 @@ async fn handle_auth(backend: &dyn Auth) -> Result<()> {
                 }
             }
             AuthState::WaitingPhone => {
-                let phone = prompt_line("\n[Telegram Login] Enter your phone number (e.g. +8613800000000): ")?;
+                let phone =
+                    prompt_line("\n[Telegram Login] Enter your phone number (e.g. +8613800000000): ")?;
                 backend.send_phone_number(&phone).await?;
             }
             AuthState::WaitingCode => {
-                let code = prompt_line("[Telegram Login] Enter authentication code sent to your Telegram app: ")?;
+                let code =
+                    prompt_line("[Telegram Login] Enter authentication code sent to your Telegram app: ")?;
                 backend.send_auth_code(&code).await?;
             }
             AuthState::WaitingPassword => {

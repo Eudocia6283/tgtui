@@ -38,7 +38,8 @@ impl EventHandler {
         let tx_signal = tx.clone();
         tokio::spawn(async move {
             use tokio::signal::unix::{signal, SignalKind};
-            let (Ok(mut hup), Ok(mut term)) = (signal(SignalKind::hangup()), signal(SignalKind::terminate())) else {
+            let (Ok(mut hup), Ok(mut term)) = (signal(SignalKind::hangup()), signal(SignalKind::terminate()))
+            else {
                 return;
             };
             tokio::select! {
@@ -48,7 +49,11 @@ impl EventHandler {
             let _ = tx_signal.send(AppEvent::Quit);
         });
 
-        let mut handler = Self { tx, rx, input_task: None };
+        let mut handler = Self {
+            tx,
+            rx,
+            input_task: None,
+        };
         handler.start_input();
         handler
     }

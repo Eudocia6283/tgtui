@@ -28,17 +28,46 @@ pub struct Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Op {
-    Hello { version: u32 },
+    Hello {
+        version: u32,
+    },
     GetChats,
-    GetMessages { chat_id: i64, limit: usize },
-    LoadOlder { chat_id: i64, from_message_id: i64 },
-    DownloadMedia { file_id: i32 },
-    DownloadFile { file_id: i32 },
-    SendMessage { chat_id: i64, text: String, reply_to_id: Option<i64> },
-    SendFile { chat_id: i64, file: Attachment, caption: String, reply_to_id: Option<i64> },
-    DeleteMessage { chat_id: i64, message_id: i64 },
-    MarkAsRead { chat_id: i64, max_message_id: i64 },
-    SetViewing { chat_id: Option<i64> },
+    GetMessages {
+        chat_id: i64,
+        limit: usize,
+    },
+    LoadOlder {
+        chat_id: i64,
+        from_message_id: i64,
+    },
+    DownloadMedia {
+        file_id: i32,
+    },
+    DownloadFile {
+        file_id: i32,
+    },
+    SendMessage {
+        chat_id: i64,
+        text: String,
+        reply_to_id: Option<i64>,
+    },
+    SendFile {
+        chat_id: i64,
+        file: Attachment,
+        caption: String,
+        reply_to_id: Option<i64>,
+    },
+    DeleteMessage {
+        chat_id: i64,
+        message_id: i64,
+    },
+    MarkAsRead {
+        chat_id: i64,
+        max_message_id: i64,
+    },
+    SetViewing {
+        chat_id: Option<i64>,
+    },
     SendPhone(String),
     SendCode(String),
     SendPassword(String),
@@ -54,7 +83,11 @@ pub enum Reply {
     Messages(Vec<Message>),
     Path(PathBuf),
     Error(Option<String>),
-    Status { pid: u32, clients: usize, auth: AuthState },
+    Status {
+        pid: u32,
+        clients: usize,
+        auth: AuthState,
+    },
 }
 
 #[derive(Serialize, Deserialize)]

@@ -13,13 +13,25 @@ pub enum BackendEvent {
     /// A brand-new message (incoming or our own pending one).
     NewMessage(Message),
     /// A message was replaced (send succeeded and got a server id, or edited).
-    MessageUpdated { old_id: i64, message: Message },
+    MessageUpdated {
+        old_id: i64,
+        message: Message,
+    },
     /// Messages were permanently deleted.
-    MessagesDeleted { chat_id: i64, message_ids: Vec<i64> },
+    MessagesDeleted {
+        chat_id: i64,
+        message_ids: Vec<i64>,
+    },
     /// Our outgoing messages up to `message_id` have been read by the peer.
-    OutboxRead { chat_id: i64, message_id: i64 },
+    OutboxRead {
+        chat_id: i64,
+        message_id: i64,
+    },
     /// Full (sorted) history snapshot for a chat.
-    History { chat_id: i64, messages: Vec<Message> },
+    History {
+        chat_id: i64,
+        messages: Vec<Message>,
+    },
     /// Chat created or changed (order 0 = removed from the main list).
     ChatUpdated(Chat),
     ConnectionStatus(String),
@@ -27,12 +39,20 @@ pub enum BackendEvent {
     /// Informational message for the status bar.
     Status(String),
     /// A file requested with `download_file` finished downloading.
-    FileDownloaded { file_id: i32, path: PathBuf },
+    FileDownloaded {
+        file_id: i32,
+        path: PathBuf,
+    },
     /// The user clicked "Open" on a notification for this chat (daemon -> TUI).
-    OpenChat { chat_id: i64 },
+    OpenChat {
+        chat_id: i64,
+    },
     /// An inline image finished decoding (sent by the app's own worker).
     #[serde(skip)]
-    ImageDecoded { file_id: i32, result: std::result::Result<crate::images::DecodedImage, String> },
+    ImageDecoded {
+        file_id: i32,
+        result: std::result::Result<crate::images::DecodedImage, String>,
+    },
 }
 
 #[async_trait::async_trait]

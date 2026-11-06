@@ -1,6 +1,6 @@
 use super::model::{
-    format_chat_time, format_message_time, Attachment, Chat, ChatType, Media, MediaKind, Message,
-    Preview, ReplyInfo, SendState,
+    format_chat_time, format_message_time, Attachment, Chat, ChatType, Media, MediaKind, Message, Preview,
+    ReplyInfo, SendState,
 };
 use super::{Auth, BackendEvent, TelegramBackend};
 use anyhow::{anyhow, bail, Result};
@@ -209,7 +209,8 @@ impl TdlibBackend {
     pub fn close_opened_chat(&self) {
         let prev = self.opened_chat.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(chat_id) = prev {
-            self.client.send(&json!({ "@type": "closeChat", "chat_id": chat_id }));
+            self.client
+                .send(&json!({ "@type": "closeChat", "chat_id": chat_id }));
         }
     }
 
@@ -222,7 +223,11 @@ impl TdlibBackend {
         self.client.send(&req);
         let resp = rx.await.map_err(|_| anyhow!("TDLib client closed"))?;
         if resp["@type"] == "error" {
-            bail!("{} ({})", resp["message"].as_str().unwrap_or("unknown error"), resp["code"]);
+            bail!(
+                "{} ({})",
+                resp["message"].as_str().unwrap_or("unknown error"),
+                resp["code"]
+            );
         }
         Ok(resp)
     }
@@ -230,7 +235,8 @@ impl TdlibBackend {
     /// TDLib answers with updateNewMessage (pending) and later
     /// updateMessageSendSucceeded, which the receive thread forwards.
     fn send_content(&self, chat_id: i64, content: Value, reply_to_id: Option<i64>) {
-        self.client.send(&send_message_request(chat_id, content, reply_to_id));
+        self.client
+            .send(&send_message_request(chat_id, content, reply_to_id));
     }
 
     fn request_history(&self, chat_id: i64, from_message_id: i64, limit: usize, tag: &str) {
@@ -327,13 +333,19 @@ impl TelegramBackend for TdlibBackend {
             let mut opened = self.opened_chat.lock().unwrap_or_else(|e| e.into_inner());
             if *opened != Some(chat_id) {
                 if let Some(prev) = opened.replace(chat_id) {
-                    self.client.send(&json!({ "@type": "closeChat", "chat_id": prev }));
+                    self.client
+                        .send(&json!({ "@type": "closeChat", "chat_id": prev }));
                 }
-                self.client.send(&json!({ "@type": "openChat", "chat_id": chat_id }));
+                self.client
+                    .send(&json!({ "@type": "openChat", "chat_id": chat_id }));
             }
         }
         self.request_history(chat_id, 0, limit, "history");
-        Ok(lock(&self.state).messages.get(&chat_id).cloned().unwrap_or_default())
+        Ok(lock(&self.state)
+            .messages
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn load_older(&self, chat_id: i64, from_message_id: i64) -> Result<()> {
@@ -366,12 +378,17 @@ impl TelegramBackend for TdlibBackend {
         let file = match tokio::time::timeout(DOWNLOAD_TIMEOUT, req).await {
             Ok(res) => res?,
             Err(_) => {
-                self.client.send(&json!({ "@type": "cancelDownloadFile", "file_id": file_id }));
+                self.client
+                    .send(&json!({ "@type": "cancelDownloadFile", "file_id": file_id }));
                 bail!("download timed out");
             }
         };
         let path = file["local"]["path"].as_str().unwrap_or("");
-        if !file["local"]["is_downloading_completed"].as_bool().unwrap_or(false) || path.is_empty() {
+        if !file["local"]["is_downloading_completed"]
+            .as_bool()
+            .unwrap_or(false)
+            || path.is_empty()
+        {
             bail!("download did not complete");
         }
         Ok(PathBuf::from(path))
@@ -402,7 +419,11 @@ impl TelegramBackend for TdlibBackend {
         let size = std::fs::metadata(&file.path).map(|m| m.len()).unwrap_or(0);
         let photo_ok = dims.is_some_and(|(w, h)| w + h <= 10_000 && w.max(h) <= 20 * w.min(h).max(1))
             && size <= 10 * 1024 * 1024;
-        let kind = if file.kind == MediaKind::Image && !photo_ok { MediaKind::File } else { file.kind };
+        let kind = if file.kind == MediaKind::Image && !photo_ok {
+            MediaKind::File
+        } else {
+            file.kind
+        };
         let (w, h) = dims.unwrap_or((0, 0));
         let caption = formatted_text(&caption);
 
@@ -437,7 +458,10 @@ impl TelegramBackend for TdlibBackend {
             ),
         };
 
-        match self.request(send_message_request(chat_id, current, reply_to_id)).await {
+        match self
+            .request(send_message_request(chat_id, current, reply_to_id))
+            .await
+        {
             Ok(_) => Ok(()),
             Err(e) if is_schema_mismatch(&e.to_string()) => self
                 .request(send_message_request(chat_id, legacy, reply_to_id))
@@ -556,7 +580,11 @@ impl Worker {
                 .trim()
                 .to_string();
                 let user = User {
-                    name: if name.is_empty() { format!("User {id}") } else { name },
+                    name: if name.is_empty() {
+                        format!("User {id}")
+                    } else {
+                        name
+                    },
                     username: u["usernames"]["active_usernames"][0]
                         .as_str()
                         .or_else(|| u["username"].as_str())
@@ -635,7 +663,10 @@ impl Worker {
                         }
                     }
                 }
-                self.emit(BackendEvent::OutboxRead { chat_id, message_id: last_read });
+                self.emit(BackendEvent::OutboxRead {
+                    chat_id,
+                    message_id: last_read,
+                });
             }
 
             "updateChatNotificationSettings" => {
@@ -683,7 +714,10 @@ impl Worker {
                     })
                 };
                 if let Some(message) = updated {
-                    self.emit(BackendEvent::MessageUpdated { old_id: message_id, message });
+                    self.emit(BackendEvent::MessageUpdated {
+                        old_id: message_id,
+                        message,
+                    });
                 }
             }
 
@@ -749,13 +783,19 @@ impl Worker {
         if local["is_downloading_completed"].as_bool() == Some(true) {
             let wanted = lock(&self.state).wanted_downloads.remove(&id);
             if let (true, Some(path)) = (wanted, local["path"].as_str()) {
-                self.emit(BackendEvent::FileDownloaded { file_id: id, path: PathBuf::from(path) });
+                self.emit(BackendEvent::FileDownloaded {
+                    file_id: id,
+                    path: PathBuf::from(path),
+                });
             }
         }
 
         // Upload progress for our own media messages.
         if remote["is_uploading_active"].as_bool() == Some(true) {
-            let total = file["size"].as_u64().or_else(|| file["expected_size"].as_u64()).unwrap_or(0);
+            let total = file["size"]
+                .as_u64()
+                .or_else(|| file["expected_size"].as_u64())
+                .unwrap_or(0);
             let done = remote["uploaded_size"].as_u64().unwrap_or(0);
             if let Some(step) = (done * 10).checked_div(total) {
                 let prev = lock(&self.state).upload_progress.insert(id, step);
@@ -848,7 +888,10 @@ impl Worker {
             }
         }
 
-        self.emit(BackendEvent::History { chat_id, messages: snapshot });
+        self.emit(BackendEvent::History {
+            chat_id,
+            messages: snapshot,
+        });
     }
 
     fn on_error(&self, val: &Value) {
@@ -857,7 +900,11 @@ impl Worker {
         if val["@extra"] == "loadChats" && code == 404 {
             return;
         }
-        let message = format!("{} ({})", val["message"].as_str().unwrap_or("unknown error"), code);
+        let message = format!(
+            "{} ({})",
+            val["message"].as_str().unwrap_or("unknown error"),
+            code
+        );
         if *self.auth_tx.borrow() != AuthState::Ready {
             lock(&self.state).last_error = Some(message);
             // Wake up the login prompt so it can show the error.
@@ -1071,7 +1118,13 @@ fn thumbnail_preview(thumb: &Value) -> Option<Preview> {
 /// most 800px on its longer side (TDLib lists sizes smallest first).
 fn photo_preview(sizes: &Value) -> Option<Preview> {
     let sizes = sizes.as_array()?;
-    let fits = |s: &&Value| s["width"].as_u64().unwrap_or(0).max(s["height"].as_u64().unwrap_or(0)) <= 800;
+    let fits = |s: &&Value| {
+        s["width"]
+            .as_u64()
+            .unwrap_or(0)
+            .max(s["height"].as_u64().unwrap_or(0))
+            <= 800
+    };
     let size = sizes.iter().rfind(fits).or_else(|| sizes.first())?;
     file_preview(&size["photo"])
 }
@@ -1088,42 +1141,76 @@ fn content_media(content: &Value) -> Option<Media> {
         "messageSticker" => {
             let s = &content["sticker"];
             if s["format"]["@type"] == "stickerFormatWebp" {
-                (s["sticker"].clone(), MediaKind::Image, file_preview(&s["sticker"]))
+                (
+                    s["sticker"].clone(),
+                    MediaKind::Image,
+                    file_preview(&s["sticker"]),
+                )
             } else {
-                (s["sticker"].clone(), MediaKind::File, thumbnail_preview(&s["thumbnail"]))
+                (
+                    s["sticker"].clone(),
+                    MediaKind::File,
+                    thumbnail_preview(&s["thumbnail"]),
+                )
             }
         }
         "messageDocument" => {
             let d = &content["document"];
             let is_image = d["mime_type"].as_str().unwrap_or("").starts_with("image/");
-            let kind = if is_image { MediaKind::Image } else { MediaKind::File };
+            let kind = if is_image {
+                MediaKind::Image
+            } else {
+                MediaKind::File
+            };
             let small = d["document"]["size"].as_u64().unwrap_or(u64::MAX) < 10 * 1024 * 1024;
             let preview = thumbnail_preview(&d["thumbnail"]).or_else(|| {
-                (is_image && small).then(|| file_preview(&d["document"])).flatten()
+                (is_image && small)
+                    .then(|| file_preview(&d["document"]))
+                    .flatten()
             });
             (d["document"].clone(), kind, preview)
         }
         "messageAnimation" => {
             let a = &content["animation"];
-            (a["animation"].clone(), MediaKind::File, thumbnail_preview(&a["thumbnail"]))
+            (
+                a["animation"].clone(),
+                MediaKind::File,
+                thumbnail_preview(&a["thumbnail"]),
+            )
         }
         "messageVideo" => {
             let v = &content["video"];
-            (v["video"].clone(), MediaKind::File, thumbnail_preview(&v["thumbnail"]))
+            (
+                v["video"].clone(),
+                MediaKind::File,
+                thumbnail_preview(&v["thumbnail"]),
+            )
         }
         "messageVideoNote" => {
             let v = &content["video_note"];
-            (v["video"].clone(), MediaKind::File, thumbnail_preview(&v["thumbnail"]))
+            (
+                v["video"].clone(),
+                MediaKind::File,
+                thumbnail_preview(&v["thumbnail"]),
+            )
         }
         "messageAudio" => {
             let a = &content["audio"];
-            (a["audio"].clone(), MediaKind::File, thumbnail_preview(&a["album_cover_thumbnail"]))
+            (
+                a["audio"].clone(),
+                MediaKind::File,
+                thumbnail_preview(&a["album_cover_thumbnail"]),
+            )
         }
         "messageVoiceNote" => (content["voice_note"]["voice"].clone(), MediaKind::File, None),
         _ => return None,
     };
     let file_id = file["id"].as_i64()? as i32;
-    Some(Media { file_id, kind, preview })
+    Some(Media {
+        file_id,
+        kind,
+        preview,
+    })
 }
 
 fn send_state(m: &Value) -> SendState {
@@ -1214,13 +1301,22 @@ mod tests {
     #[test]
     fn read_receipts_use_initial_chat_state() {
         let mut st = State::default();
-        build_chat(&mut st, &json!({
-            "@type": "chat", "id": 7, "title": "Bob",
-            "type": { "@type": "chatTypePrivate", "user_id": 2 },
-            "last_read_outbox_message_id": 100
-        }));
-        assert!(parse_message(&st, &outgoing(7, 100)).is_read, "read by peer -> two ticks");
-        assert!(!parse_message(&st, &outgoing(7, 101)).is_read, "newer -> one tick");
+        build_chat(
+            &mut st,
+            &json!({
+                "@type": "chat", "id": 7, "title": "Bob",
+                "type": { "@type": "chatTypePrivate", "user_id": 2 },
+                "last_read_outbox_message_id": 100
+            }),
+        );
+        assert!(
+            parse_message(&st, &outgoing(7, 100)).is_read,
+            "read by peer -> two ticks"
+        );
+        assert!(
+            !parse_message(&st, &outgoing(7, 101)).is_read,
+            "newer -> one tick"
+        );
         // Incoming messages are never shown with ticks, but count as read.
         let mut incoming = outgoing(7, 200);
         incoming["is_outgoing"] = json!(false);
@@ -1229,10 +1325,12 @@ mod tests {
 
     #[test]
     fn photo_messages_get_inline_preview() {
-        let size = |w: u32, id: i32| json!({
-            "type": "x", "width": w, "height": w,
-            "photo": { "id": id, "local": { "is_downloading_completed": false, "path": "" } }
-        });
+        let size = |w: u32, id: i32| {
+            json!({
+                "type": "x", "width": w, "height": w,
+                "photo": { "id": id, "local": { "is_downloading_completed": false, "path": "" } }
+            })
+        };
         let content = json!({
             "@type": "messagePhoto",
             "photo": { "sizes": [size(90, 1), size(320, 2), size(800, 3), size(1280, 4)] },
@@ -1240,7 +1338,11 @@ mod tests {
         });
         let media = content_media(&content).unwrap();
         assert_eq!(media.file_id, 4, "o opens the largest size");
-        assert_eq!(media.preview.unwrap().file_id, 3, "inline uses the largest <= 800px");
+        assert_eq!(
+            media.preview.unwrap().file_id,
+            3,
+            "inline uses the largest <= 800px"
+        );
         assert_eq!(content_text(&content), "[Photo] cat");
     }
 }

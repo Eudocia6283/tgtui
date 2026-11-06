@@ -29,8 +29,18 @@ struct Corners {
 
 fn corners(border_type: BorderType) -> Corners {
     match border_type {
-        BorderType::Rounded => Corners { tl: "╭", tr: "╮", bl: "╰", br: "╯" },
-        _ => Corners { tl: "┌", tr: "┐", bl: "└", br: "┘" },
+        BorderType::Rounded => Corners {
+            tl: "╭",
+            tr: "╮",
+            bl: "╰",
+            br: "╯",
+        },
+        _ => Corners {
+            tl: "┌",
+            tr: "┐",
+            bl: "└",
+            br: "┘",
+        },
     }
 }
 
@@ -61,7 +71,11 @@ fn bubble<'a>(
     } else {
         theme.border_normal
     };
-    let body_style = if is_selected { theme.text_bold } else { theme.text_normal };
+    let body_style = if is_selected {
+        theme.text_bold
+    } else {
+        theme.text_normal
+    };
 
     // Header shown in the top border.
     let media_icon = match msg.media.as_ref().map(|m| m.kind) {
@@ -71,7 +85,10 @@ fn bubble<'a>(
     };
     let mut header: Vec<Span> = Vec::new();
     if msg.is_outgoing {
-        header.push(Span::styled(format!("{media_icon}{}", msg.time_str), theme.text_muted));
+        header.push(Span::styled(
+            format!("{media_icon}{}", msg.time_str),
+            theme.text_muted,
+        ));
         header.push(match msg.send_state {
             SendState::Pending => Span::styled(" ⏳", theme.text_muted),
             SendState::Failed(_) => Span::styled(" ✗", theme.error),
@@ -82,7 +99,10 @@ fn bubble<'a>(
     } else {
         let name = truncate_str(&msg.sender_name, max_bubble.saturating_sub(13).max(1));
         header.push(Span::styled(name, theme.text_sender_other));
-        header.push(Span::styled(format!("  {media_icon}{}", msg.time_str), theme.text_muted));
+        header.push(Span::styled(
+            format!("  {media_icon}{}", msg.time_str),
+            theme.text_muted,
+        ));
     }
     let header_w: usize = header.iter().map(|s| s.width()).sum();
 
@@ -101,8 +121,16 @@ fn bubble<'a>(
             images.request_placement(id, cols, rows);
             (id, cols, rows)
         });
-    let text = if image.is_some() { strip_media_label(&msg.text) } else { msg.text.as_str() };
-    let mut body = if text.is_empty() { Vec::new() } else { wrap_text(text, max_content) };
+    let text = if image.is_some() {
+        strip_media_label(&msg.text)
+    } else {
+        msg.text.as_str()
+    };
+    let mut body = if text.is_empty() {
+        Vec::new()
+    } else {
+        wrap_text(text, max_content)
+    };
     let failure = match &msg.send_state {
         SendState::Failed(e) => wrap_text(&format!("{} {e}", theme.icons.warning), max_content),
         _ => Vec::new(),
@@ -126,7 +154,11 @@ fn bubble<'a>(
         .max(hint.map(|h| h.width() + 3).unwrap_or(0))
         .min(max_bubble);
     let inner_w = bubble_w - 4;
-    let indent = if msg.is_outgoing { pane_width.saturating_sub(bubble_w) } else { 0 };
+    let indent = if msg.is_outgoing {
+        pane_width.saturating_sub(bubble_w)
+    } else {
+        0
+    };
     let pad = || Span::raw(" ".repeat(indent));
 
     // Top border
@@ -170,7 +202,13 @@ fn bubble<'a>(
 
     // Bottom border (with an "open media" hint on the selected bubble)
     let bottom = match hint {
-        Some(h) => format!("{}─{}{}{}", c.bl, h, "─".repeat(bubble_w.saturating_sub(h.width() + 3)), c.br),
+        Some(h) => format!(
+            "{}─{}{}{}",
+            c.bl,
+            h,
+            "─".repeat(bubble_w.saturating_sub(h.width() + 3)),
+            c.br
+        ),
         None => format!("{}{}{}", c.bl, "─".repeat(bubble_w - 2), c.br),
     };
     out.push(Line::from(vec![pad(), Span::styled(bottom, border)]));
@@ -212,20 +250,33 @@ pub fn render(
     // One column of margin on each side of the bubbles.
     let pane_width = (inner.width as usize).saturating_sub(2);
 
-    let max_image_rows = IMAGE_MAX_ROWS.min((inner.height as usize).saturating_sub(3)).max(1);
+    let max_image_rows = IMAGE_MAX_ROWS
+        .min((inner.height as usize).saturating_sub(3))
+        .max(1);
 
     let mut lines: Vec<Line> = Vec::new();
     // Line range [start, end) of the selected message, to keep it in view.
     let mut selected_range = (0, 0);
 
     if messages.is_empty() && active_chat.is_some() {
-        lines.push(Line::from(Span::styled("No messages loaded yet…", theme.text_muted)));
+        lines.push(Line::from(Span::styled(
+            "No messages loaded yet…",
+            theme.text_muted,
+        )));
     }
 
     for (i, msg) in messages.iter().enumerate() {
         let is_selected = i == selected_msg_idx;
         let start = lines.len();
-        bubble(msg, is_selected, pane_width, max_image_rows, images, theme, &mut lines);
+        bubble(
+            msg,
+            is_selected,
+            pane_width,
+            max_image_rows,
+            images,
+            theme,
+            &mut lines,
+        );
         if is_selected {
             selected_range = (start, lines.len());
         }

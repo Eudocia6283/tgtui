@@ -9,9 +9,8 @@ use ratatui::{
 };
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme) {
-    let heading = |text: &'static str, style: Style| {
-        Line::from(Span::styled(text, style.add_modifier(Modifier::BOLD)))
-    };
+    let heading =
+        |text: &'static str, style: Style| Line::from(Span::styled(text, style.add_modifier(Modifier::BOLD)));
     let help_lines = vec![
         heading("NORMAL MODE (Navigation & Actions)", theme.accent),
         Line::from("  j / k       : Move down / up (messages or chat list)"),
@@ -38,7 +37,10 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from("  <C-j>/<C-k> : Next / previous result (also ↓/↑)"),
         Line::from("  <Enter>     : Jump to chat    <Esc>: close"),
         Line::from(""),
-        Line::from(Span::styled("Press <Esc> or ? to close this help", theme.text_muted)),
+        Line::from(Span::styled(
+            "Press <Esc> or ? to close this help",
+            theme.text_muted,
+        )),
     ];
 
     let popup_area = centered_fixed(66, help_lines.len() as u16 + 2, area);

@@ -62,32 +62,137 @@ impl MockBackend {
     pub fn new(event_tx: mpsc::UnboundedSender<BackendEvent>) -> Self {
         use ChatType::*;
         let chats = vec![
-            chat(1, "Saved Messages", None, Direct, 0, true, false, "TODO: update niri configuration", "12m", None),
-            chat(2, "#archlinux-general", Some("archlinux_general"), Group, 4, false, false, "Bob: Works like a charm on Arch!", "1m", Some(4821)),
-            chat(3, "Rustaceans Daily", Some("rust_daily"), Channel, 0, false, false, "Ratatui 0.29 released with new widgets!", "35m", Some(18400)),
-            chat(4, "Alice Cooper", Some("alice_c"), Direct, 1, false, false, "See you at the Linux meetup!", "2h", None),
-            chat(5, "Noctalia Devs", Some("noctalia_project"), Group, 0, false, true, "New shell widgets & quickshell merged", "5h", Some(342)),
-            chat(6, "Arch Linux News", Some("archlinux_news"), Channel, 0, false, false, "Kernel 6.13 package rebuild announcements", "1d", Some(142000)),
+            chat(
+                1,
+                "Saved Messages",
+                None,
+                Direct,
+                0,
+                true,
+                false,
+                "TODO: update niri configuration",
+                "12m",
+                None,
+            ),
+            chat(
+                2,
+                "#archlinux-general",
+                Some("archlinux_general"),
+                Group,
+                4,
+                false,
+                false,
+                "Bob: Works like a charm on Arch!",
+                "1m",
+                Some(4821),
+            ),
+            chat(
+                3,
+                "Rustaceans Daily",
+                Some("rust_daily"),
+                Channel,
+                0,
+                false,
+                false,
+                "Ratatui 0.29 released with new widgets!",
+                "35m",
+                Some(18400),
+            ),
+            chat(
+                4,
+                "Alice Cooper",
+                Some("alice_c"),
+                Direct,
+                1,
+                false,
+                false,
+                "See you at the Linux meetup!",
+                "2h",
+                None,
+            ),
+            chat(
+                5,
+                "Noctalia Devs",
+                Some("noctalia_project"),
+                Group,
+                0,
+                false,
+                true,
+                "New shell widgets & quickshell merged",
+                "5h",
+                Some(342),
+            ),
+            chat(
+                6,
+                "Arch Linux News",
+                Some("archlinux_news"),
+                Channel,
+                0,
+                false,
+                false,
+                "Kernel 6.13 package rebuild announcements",
+                "1d",
+                Some(142000),
+            ),
         ];
 
         let mut messages_map = HashMap::new();
         messages_map.insert(
             1,
             vec![
-                msg(1, 1, "Me", "Welcome to telegram-tui demo mode! Press ? for keybindings.", "11:58", None),
+                msg(
+                    1,
+                    1,
+                    "Me",
+                    "Welcome to telegram-tui demo mode! Press ? for keybindings.",
+                    "11:58",
+                    None,
+                ),
                 msg(2, 1, "Me", "TODO: update niri configuration", "12:02", None),
                 Message {
-                    media: Some(Media { file_id: 1, kind: MediaKind::Image, preview: None }),
-                    ..msg(3, 1, "Me", "[Photo] niri screenshot (press o to open)", "12:05", None)
+                    media: Some(Media {
+                        file_id: 1,
+                        kind: MediaKind::Image,
+                        preview: None,
+                    }),
+                    ..msg(
+                        3,
+                        1,
+                        "Me",
+                        "[Photo] niri screenshot (press o to open)",
+                        "12:05",
+                        None,
+                    )
                 },
             ],
         );
         messages_map.insert(
             2,
             vec![
-                msg(101, 2, "Alice", "Has anyone tested running a modern TUI on niri with fish?", "14:18", None),
-                msg(102, 2, "Dave", "Yeah, niri's horizontal scrolling handles wide terminals smoothly.", "14:20", None),
-                msg(103, 2, "Alice", "Can you share your vim keybindings for quick navigation?", "14:22", None),
+                msg(
+                    101,
+                    2,
+                    "Alice",
+                    "Has anyone tested running a modern TUI on niri with fish?",
+                    "14:18",
+                    None,
+                ),
+                msg(
+                    102,
+                    2,
+                    "Dave",
+                    "Yeah, niri's horizontal scrolling handles wide terminals smoothly.",
+                    "14:20",
+                    None,
+                ),
+                msg(
+                    103,
+                    2,
+                    "Alice",
+                    "Can you share your vim keybindings for quick navigation?",
+                    "14:22",
+                    None,
+                ),
                 msg(
                     104,
                     2,
@@ -99,12 +204,26 @@ impl MockBackend {
                         text_preview: "Has anyone tested running a modern TUI on niri...".into(),
                     }),
                 ),
-                msg(105, 2, "Me", "Yep, writing it in Rust with Ratatui right now!", "14:26", None),
+                msg(
+                    105,
+                    2,
+                    "Me",
+                    "Yep, writing it in Rust with Ratatui right now!",
+                    "14:26",
+                    None,
+                ),
             ],
         );
         messages_map.insert(
             4,
-            vec![msg(401, 4, "Alice Cooper", "See you at the Linux meetup!", "12:40", None)],
+            vec![msg(
+                401,
+                4,
+                "Alice Cooper",
+                "See you at the Linux meetup!",
+                "12:40",
+                None,
+            )],
         );
 
         let _ = event_tx.send(BackendEvent::ConnectionStatus("demo".into()));
@@ -163,7 +282,13 @@ impl TelegramBackend for MockBackend {
     }
 
     async fn get_messages(&self, chat_id: i64, _limit: usize) -> Result<Vec<Message>> {
-        Ok(self.messages.lock().await.get(&chat_id).cloned().unwrap_or_default())
+        Ok(self
+            .messages
+            .lock()
+            .await
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn send_message(&self, chat_id: i64, text: String, reply_to_id: Option<i64>) -> Result<()> {
@@ -171,12 +296,22 @@ impl TelegramBackend for MockBackend {
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: i64, file: Attachment, caption: String, reply_to_id: Option<i64>) -> Result<()> {
+    async fn send_file(
+        &self,
+        chat_id: i64,
+        file: Attachment,
+        caption: String,
+        reply_to_id: Option<i64>,
+    ) -> Result<()> {
         let label = match file.kind {
             MediaKind::Image => "Photo",
             MediaKind::File => "File",
         };
-        let name = file.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = file
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let text = format!("[{label}: {name}] {caption}").trim_end().to_string();
         self.push_outgoing(chat_id, text, reply_to_id).await;
         Ok(())
