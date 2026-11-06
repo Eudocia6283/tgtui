@@ -1,0 +1,32 @@
+[package]
+name = "telegram-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Wayland & TUI Enthusiast"]
+description = "A minimalist, vim-inspired Telegram TUI client tailored for Arch Linux, niri, and Wayland."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tokio = { version = "1.38", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+libloading = "0.8"
+toml = "0.8"
+chrono = "0.4"
+unicode-width = "0.1"
+dirs = "5.0"
+anyhow = "1.0"
+log = "0.4"
+simplelog = "0.12"
+fuzzy-matcher = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,5 @@
+/target
+# Built binary copied to the project root
+/telegram-tui
+# Local config may contain api_id / api_hash
+/config.toml

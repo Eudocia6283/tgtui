@@ -1,0 +1,46 @@
+# Telegram TUI Configuration (~/.config/telegram-tui/config.toml)
+
+[general]
+# External editor command for writing long/Markdown messages (<C-e> or 'e')
+editor = "nvim"
+
+# Automatically mark current conversation messages as read when viewed
+auto_mark_read = true
+
+# Enable mouse scrolling and clicking
+enable_mouse = true
+
+[ui]
+# true:  inherit terminal 16-color ANSI palette and background transparency (Noctalia/pywal friendly)
+# false: use the built-in truecolor theme (Tokyo Night)
+use_terminal_colors = true
+
+# Use rounded Unicode borders (╭─╮ ╰─╯)
+rounded_borders = true
+
+# Breakpoint for niri scrollable tiling: below this width, collapses to single-column view
+single_column_breakpoint = 80
+
+# Width percentage of left chat list in dual-column mode
+chats_ratio_percent = 28
+
+[wayland]
+# Wayland clipboard utilities
+copy_command = "wl-copy"
+paste_command = "wl-paste"
+
+# Image viewer for previewing photos ('o'); falls back to open_command if missing
+image_viewer = "imv"
+
+# Opener for videos, audio and documents ('o')
+open_command = "xdg-open"
+
+# Desktop notification utility
+notify_command = "notify-send"
+
+# Real Telegram Account Integration (TDLib)
+# Get your api_id and api_hash from https://my.telegram.org
+[telegram]
+api_id = 0
+api_hash = ""
+session_path = "~/.local/share/telegram-tui/tdlib"
