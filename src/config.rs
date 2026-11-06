@@ -36,6 +36,9 @@ pub struct UiConfig {
     pub single_column_breakpoint: u16,
     #[serde(default = "default_ratio")]
     pub chats_ratio_percent: u16,
+    /// Show photos inline (kitty graphics protocol; ignored on other terminals).
+    #[serde(default = "default_true")]
+    pub inline_images: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,6 +100,7 @@ impl Default for UiConfig {
             rounded_borders: true,
             single_column_breakpoint: default_breakpoint(),
             chats_ratio_percent: default_ratio(),
+            inline_images: true,
         }
     }
 }

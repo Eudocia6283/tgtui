@@ -1,6 +1,7 @@
 use crate::backend::model::{Attachment, Chat, MediaKind, Message};
 use crate::backend::{BackendEvent, TelegramBackend};
 use crate::config::Config;
+use crate::images::{self, ImageStore, Need};
 use crate::mode::AppMode;
 use crate::ui::theme::Theme;
 use anyhow::{anyhow, Context, Result};
@@ -53,6 +54,7 @@ pub struct App {
     pub msg_scroll: Cell<usize>,
     pub chat_scroll: Cell<usize>,
     pub fuzzy_scroll: Cell<usize>,
+    pub images: ImageStore,
     pub backend: Arc<dyn TelegramBackend>,
     /// Lets background tasks report back (same channel as backend events).
     events_tx: mpsc::UnboundedSender<BackendEvent>,
@@ -89,6 +91,7 @@ impl App {
             chat_scroll: Cell::new(0),
             fuzzy_scroll: Cell::new(0),
             theme: Theme::new(&config.ui),
+            images: ImageStore::new(config.ui.inline_images && crate::ui::kitty::is_supported()),
             backend,
             events_tx,
             config,
@@ -123,7 +126,46 @@ impl App {
         };
         self.selected_msg_idx = self.messages.len().saturating_sub(1);
         self.mark_active_read().await;
+        self.ensure_previews().await;
         Ok(())
+    }
+
+    /// Start downloading/decoding inline previews for the loaded messages.
+    pub async fn ensure_previews(&mut self) {
+        if !self.images.enabled {
+            return;
+        }
+        let previews: Vec<_> = self
+            .messages
+            .iter()
+            .filter_map(|m| m.media.as_ref()?.preview.clone())
+            .collect();
+        for p in previews {
+            let path = p.local_path.filter(|p| p.is_file());
+            match self.images.want(p.file_id, path.is_some()) {
+                Need::Nothing => {}
+                Need::Download => {
+                    if let Err(e) = self.backend.download_file(p.file_id).await {
+                        self.images.decoded(p.file_id, Err(e.to_string()));
+                    }
+                }
+                Need::Decode => self.decode_preview(p.file_id, path.unwrap_or_default()),
+            }
+        }
+    }
+
+    pub fn preview_downloaded(&mut self, file_id: i32, path: PathBuf) {
+        if self.images.downloaded(file_id) {
+            self.decode_preview(file_id, path);
+        }
+    }
+
+    fn decode_preview(&self, file_id: i32, path: PathBuf) {
+        let tx = self.events_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = images::decode(&path);
+            let _ = tx.send(BackendEvent::ImageDecoded { file_id, result });
+        });
     }
 
     /// Select chat `idx` and load its history.
@@ -452,7 +494,7 @@ impl App {
     /// Download (if needed) and open the selected message's media in the
     /// background; the result is reported through the status bar.
     pub fn open_selected_media(&mut self) {
-        let Some(media) = self.messages.get(self.selected_msg_idx).and_then(|m| m.media) else {
+        let Some(media) = self.messages.get(self.selected_msg_idx).and_then(|m| m.media.clone()) else {
             self.set_status("Selected message has no media");
             return;
         };

@@ -194,3 +194,71 @@ async fn open_media_reports_status() {
     }
     assert!(app.status_msg.unwrap().contains("demo mode"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn inline_image_renders_with_kitty_placeholders() {
+    use crate::backend::model::{Media, MediaKind, Preview};
+    let (mut app, mut rx) = setup().await;
+    app.images.enabled = true;
+    app.images.cell_px.set((10, 20));
+
+    let path = std::env::temp_dir().join(format!("tgtui-img-{}.png", std::process::id()));
+    image::RgbImage::from_pixel(200, 100, image::Rgb([255, 0, 0])).save(&path).unwrap();
+
+    app.switch_chat(1).await.unwrap();
+    let mut m = app.messages[0].clone();
+    m.id = 999;
+    m.text = "[Photo] sunset".into();
+    m.media = Some(Media {
+        file_id: 50,
+        kind: MediaKind::Image,
+        preview: Some(Preview { file_id: 51, local_path: Some(path.clone()) }),
+    });
+    app.add_message(m);
+    app.ensure_previews().await;
+
+    // Decoding runs on a worker thread and reports back via the channel.
+    loop {
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let done = matches!(evt, BackendEvent::ImageDecoded { .. });
+        handle_event(&mut app, AppEvent::Backend(evt)).await.unwrap();
+        if done {
+            break;
+        }
+    }
+    let _ = std::fs::remove_file(&path);
+    assert!(app.images.ready(51).is_some());
+
+    let s = screen(&app, 110, 40);
+    // 200x100 px at 10x20 px cells = 20 cols x 5 rows of placeholders.
+    let rows: Vec<&str> = s.lines().filter(|l| l.contains(crate::ui::kitty::PLACEHOLDER)).collect();
+    assert_eq!(rows.len(), 5, "{s}");
+    assert_eq!(rows[0].matches(crate::ui::kitty::PLACEHOLDER).count(), 20);
+    // Inside the bubble the image replaces the "[Photo]" label (the chat list keeps it).
+    assert!(s.contains("│ sunset "), "label replaced by image:\n{s}");
+
+    let mut out = Vec::new();
+    app.images.flush(&mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.contains("a=t,f=100"), "image transmitted");
+    assert!(out.contains("a=p,U=1,") && out.contains("c=20,r=5"), "virtual placement: {}", &out[out.len().saturating_sub(80)..]);
+
+    // Next frame: already transmitted and placed -> nothing to send.
+    screen(&app, 110, 40);
+    let mut out = Vec::new();
+    app.images.flush(&mut out).unwrap();
+    assert!(out.is_empty());
+}
+
+#[tokio::test]
+async fn failed_send_is_shown_in_bubble() {
+    use crate::backend::model::SendState;
+    let (mut app, _rx) = setup().await;
+    app.switch_chat(1).await.unwrap();
+    let mut m = app.messages.last().unwrap().clone();
+    let old = m.id;
+    m.send_state = SendState::Failed("PHOTO_INVALID_DIMENSIONS".into());
+    app.update_message(old, m);
+    let s = screen(&app, 110, 30);
+    assert!(s.contains("✗") && s.contains("PHOTO_INVALID_DIMENSIONS"), "{s}");
+}

@@ -2,6 +2,7 @@ mod app;
 mod backend;
 mod config;
 mod event;
+mod images;
 mod mode;
 mod ui;
 
@@ -171,7 +172,11 @@ async fn run(
     let mut events = EventHandler::new(backend_rx);
 
     while !app.should_quit {
+        if app.images.enabled {
+            app.images.cell_px.set(ui::kitty::cell_size_px());
+        }
         terminal.draw(|f| ui::render(f, &app))?;
+        app.images.flush(terminal.backend_mut())?;
 
         let Some(event) = events.rx.recv().await else {
             break;
@@ -191,6 +196,7 @@ async fn run(
             run_editor(terminal, &mut events, &mut app).await?;
         }
     }
+    app.images.delete_all(terminal.backend_mut())?;
     Ok(())
 }
 
@@ -203,6 +209,7 @@ async fn run_editor(terminal: &mut Term, events: &mut EventHandler, app: &mut Ap
 
     setup_terminal(app.config.general.enable_mouse)?;
     terminal.clear()?;
+    app.images.invalidate();
     events.start_input();
 
     match edited {

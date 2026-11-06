@@ -1,6 +1,6 @@
 use super::model::{
     format_chat_time, format_message_time, Attachment, Chat, ChatType, Media, MediaKind, Message,
-    ReplyInfo,
+    Preview, ReplyInfo, SendState,
 };
 use super::{BackendEvent, TelegramBackend};
 use anyhow::{anyhow, bail, Result};
@@ -75,6 +75,10 @@ struct State {
     last_error: Option<String>,
     /// Requests awaiting a response, keyed by the id in `@extra = "req:<id>"`.
     pending: HashMap<u64, oneshot::Sender<Value>>,
+    /// Files requested via `download_file`.
+    wanted_downloads: std::collections::HashSet<i32>,
+    /// Last reported upload progress (in 10% steps) per file.
+    upload_progress: HashMap<i32, u64>,
 }
 
 fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
@@ -305,6 +309,19 @@ impl TelegramBackend for TdlibBackend {
         Ok(())
     }
 
+    async fn download_file(&self, file_id: i32) -> Result<()> {
+        lock(&self.state).wanted_downloads.insert(file_id);
+        self.client.send(&json!({
+            "@type": "downloadFile",
+            "file_id": file_id,
+            "priority": 1,
+            "offset": 0,
+            "limit": 0,
+            "synchronous": false
+        }));
+        Ok(())
+    }
+
     async fn download_media(&self, file_id: i32) -> Result<PathBuf> {
         let req = self.request(json!({
             "@type": "downloadFile",
@@ -348,12 +365,23 @@ impl TelegramBackend for TdlibBackend {
             bail!("file not found: {}", file.path.display());
         }
         let input_file = json!({ "@type": "inputFileLocal", "path": file.path.to_string_lossy() });
-        let content = match file.kind {
-            MediaKind::Image => json!({
-                "@type": "inputMessagePhoto",
-                "photo": input_file,
-                "caption": formatted_text(&caption)
-            }),
+        // Photos must stay within Telegram's limits; otherwise send as a file.
+        let dims = image::image_dimensions(&file.path).ok();
+        let size = std::fs::metadata(&file.path).map(|m| m.len()).unwrap_or(0);
+        let photo_ok = dims.is_some_and(|(w, h)| w + h <= 10_000 && w.max(h) <= 20 * w.min(h).max(1))
+            && size <= 10 * 1024 * 1024;
+        let kind = if file.kind == MediaKind::Image && !photo_ok { MediaKind::File } else { file.kind };
+        let content = match kind {
+            MediaKind::Image => {
+                let (w, h) = dims.unwrap_or((0, 0));
+                json!({
+                    "@type": "inputMessagePhoto",
+                    "photo": input_file,
+                    "width": w,
+                    "height": h,
+                    "caption": formatted_text(&caption)
+                })
+            }
             MediaKind::File => json!({
                 "@type": "inputMessageDocument",
                 "document": input_file,
@@ -604,6 +632,24 @@ impl Worker {
                 }
             }
 
+            "updateMessageSendFailed" => {
+                let old_id = val["old_message_id"].as_i64().unwrap_or(0);
+                let err = error_text(&val["error"], val);
+                let msg = {
+                    let mut st = lock(&self.state);
+                    let mut msg = parse_message(&st, &val["message"]);
+                    msg.send_state = SendState::Failed(err.clone());
+                    let list = st.messages.entry(msg.chat_id).or_default();
+                    list.retain(|m| m.id != old_id);
+                    upsert_message(list, msg.clone());
+                    msg
+                };
+                self.emit(BackendEvent::MessageUpdated { old_id, message: msg });
+                self.emit(BackendEvent::Error(format!("Send failed: {err}")));
+            }
+
+            "updateFile" => self.on_file(&val["file"]),
+
             "updateDeleteMessages" => {
                 if val["is_permanent"].as_bool().unwrap_or(false) {
                     let chat_id = chat_id_of(val);
@@ -636,6 +682,37 @@ impl Worker {
             _ => {}
         }
         true
+    }
+
+    fn on_file(&self, file: &Value) {
+        let Some(id) = file["id"].as_i64().map(|i| i as i32) else {
+            return;
+        };
+        let local = &file["local"];
+        let remote = &file["remote"];
+
+        if local["is_downloading_completed"].as_bool() == Some(true) {
+            let wanted = lock(&self.state).wanted_downloads.remove(&id);
+            if let (true, Some(path)) = (wanted, local["path"].as_str()) {
+                self.emit(BackendEvent::FileDownloaded { file_id: id, path: PathBuf::from(path) });
+            }
+        }
+
+        // Upload progress for our own media messages.
+        if remote["is_uploading_active"].as_bool() == Some(true) {
+            let total = file["size"].as_u64().or_else(|| file["expected_size"].as_u64()).unwrap_or(0);
+            let done = remote["uploaded_size"].as_u64().unwrap_or(0);
+            if let Some(step) = (done * 10).checked_div(total) {
+                let prev = lock(&self.state).upload_progress.insert(id, step);
+                if prev != Some(step) {
+                    self.emit(BackendEvent::Status(format!("Uploading… {}%", step * 10)));
+                }
+            }
+        } else if remote["is_uploading_completed"].as_bool() == Some(true)
+            && lock(&self.state).upload_progress.remove(&id).is_some()
+        {
+            self.emit(BackendEvent::Status("Upload complete".into()));
+        }
     }
 
     fn on_auth(&self, auth: &Value) -> bool {
@@ -889,38 +966,100 @@ fn content_text(content: &Value) -> String {
     }
 }
 
+fn file_preview(file: &Value) -> Option<Preview> {
+    let file_id = file["id"].as_i64()? as i32;
+    let local = &file["local"];
+    let local_path = (local["is_downloading_completed"].as_bool() == Some(true))
+        .then(|| local["path"].as_str())
+        .flatten()
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    Some(Preview { file_id, local_path })
+}
+
+/// Preview from a `thumbnail` object, if it is a still image we can decode.
+fn thumbnail_preview(thumb: &Value) -> Option<Preview> {
+    match thumb["format"]["@type"].as_str()? {
+        "thumbnailFormatJpeg" | "thumbnailFormatPng" | "thumbnailFormatWebp" => file_preview(&thumb["file"]),
+        _ => None,
+    }
+}
+
+/// Pick a photo size good for inline display: the largest one that is at
+/// most 800px on its longer side (TDLib lists sizes smallest first).
+fn photo_preview(sizes: &Value) -> Option<Preview> {
+    let sizes = sizes.as_array()?;
+    let fits = |s: &&Value| s["width"].as_u64().unwrap_or(0).max(s["height"].as_u64().unwrap_or(0)) <= 800;
+    let size = sizes.iter().rfind(fits).or_else(|| sizes.first())?;
+    file_preview(&size["photo"])
+}
+
 /// The downloadable file attached to a message, if any.
 fn content_media(content: &Value) -> Option<Media> {
-    let (file, kind) = match content["@type"].as_str().unwrap_or("") {
-        // Largest size is last.
-        "messagePhoto" => (content["photo"]["sizes"].as_array()?.last()?["photo"].clone(), MediaKind::Image),
+    let (file, kind, preview) = match content["@type"].as_str().unwrap_or("") {
+        "messagePhoto" => {
+            let sizes = &content["photo"]["sizes"];
+            // Largest size is last.
+            let full = sizes.as_array()?.last()?["photo"].clone();
+            (full, MediaKind::Image, photo_preview(sizes))
+        }
         "messageSticker" => {
             let s = &content["sticker"];
-            let kind = if s["format"]["@type"] == "stickerFormatWebp" {
-                MediaKind::Image
+            if s["format"]["@type"] == "stickerFormatWebp" {
+                (s["sticker"].clone(), MediaKind::Image, file_preview(&s["sticker"]))
             } else {
-                MediaKind::File
-            };
-            (s["sticker"].clone(), kind)
+                (s["sticker"].clone(), MediaKind::File, thumbnail_preview(&s["thumbnail"]))
+            }
         }
         "messageDocument" => {
             let d = &content["document"];
-            let kind = if d["mime_type"].as_str().unwrap_or("").starts_with("image/") {
-                MediaKind::Image
-            } else {
-                MediaKind::File
-            };
-            (d["document"].clone(), kind)
+            let is_image = d["mime_type"].as_str().unwrap_or("").starts_with("image/");
+            let kind = if is_image { MediaKind::Image } else { MediaKind::File };
+            let small = d["document"]["size"].as_u64().unwrap_or(u64::MAX) < 10 * 1024 * 1024;
+            let preview = thumbnail_preview(&d["thumbnail"]).or_else(|| {
+                (is_image && small).then(|| file_preview(&d["document"])).flatten()
+            });
+            (d["document"].clone(), kind, preview)
         }
-        "messageAnimation" => (content["animation"]["animation"].clone(), MediaKind::File),
-        "messageVideo" => (content["video"]["video"].clone(), MediaKind::File),
-        "messageVideoNote" => (content["video_note"]["video"].clone(), MediaKind::File),
-        "messageAudio" => (content["audio"]["audio"].clone(), MediaKind::File),
-        "messageVoiceNote" => (content["voice_note"]["voice"].clone(), MediaKind::File),
+        "messageAnimation" => {
+            let a = &content["animation"];
+            (a["animation"].clone(), MediaKind::File, thumbnail_preview(&a["thumbnail"]))
+        }
+        "messageVideo" => {
+            let v = &content["video"];
+            (v["video"].clone(), MediaKind::File, thumbnail_preview(&v["thumbnail"]))
+        }
+        "messageVideoNote" => {
+            let v = &content["video_note"];
+            (v["video"].clone(), MediaKind::File, thumbnail_preview(&v["thumbnail"]))
+        }
+        "messageAudio" => {
+            let a = &content["audio"];
+            (a["audio"].clone(), MediaKind::File, thumbnail_preview(&a["album_cover_thumbnail"]))
+        }
+        "messageVoiceNote" => (content["voice_note"]["voice"].clone(), MediaKind::File, None),
         _ => return None,
     };
     let file_id = file["id"].as_i64()? as i32;
-    Some(Media { file_id, kind })
+    Some(Media { file_id, kind, preview })
+}
+
+fn send_state(m: &Value) -> SendState {
+    let st = &m["sending_state"];
+    match st["@type"].as_str().unwrap_or("") {
+        "messageSendingStatePending" => SendState::Pending,
+        "messageSendingStateFailed" => SendState::Failed(error_text(&st["error"], st)),
+        _ => SendState::Sent,
+    }
+}
+
+/// Message of an `error` object (falls back to legacy `error_message` fields).
+fn error_text(err: &Value, legacy: &Value) -> String {
+    err["message"]
+        .as_str()
+        .or_else(|| legacy["error_message"].as_str())
+        .unwrap_or("unknown error")
+        .to_string()
 }
 
 fn parse_message(st: &State, m: &Value) -> Message {
@@ -960,6 +1099,7 @@ fn parse_message(st: &State, m: &Value) -> Message {
         is_read: !is_outgoing || st.outbox_read.get(&chat_id).is_some_and(|&r| id <= r),
         reply_to,
         media: content_media(&m["content"]),
+        send_state: send_state(m),
     }
 }
 

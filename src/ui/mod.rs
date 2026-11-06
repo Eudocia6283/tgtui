@@ -1,4 +1,5 @@
 pub mod components;
+pub mod kitty;
 pub mod theme;
 pub mod utils;
 
@@ -104,6 +105,7 @@ fn render_messages_pane(f: &mut Frame, area: Rect, app: &App, focused: bool) {
         app.selected_msg_idx,
         focused,
         &app.msg_scroll,
+        &app.images,
         &app.theme,
     );
 

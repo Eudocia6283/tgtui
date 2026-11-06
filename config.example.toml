@@ -24,6 +24,9 @@ single_column_breakpoint = 80
 # Width percentage of left chat list in dual-column mode
 chats_ratio_percent = 28
 
+# Show photos/thumbnails inline in kitty (graphics protocol); ignored elsewhere
+inline_images = true
+
 [wayland]
 # Wayland clipboard utilities
 copy_command = "wl-copy"

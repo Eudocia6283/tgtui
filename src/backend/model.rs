@@ -38,10 +38,28 @@ pub enum MediaKind {
     File,
 }
 
-#[derive(Debug, Clone, Copy)]
+/// A small still image shown inline (photo size or thumbnail).
+#[derive(Debug, Clone)]
+pub struct Preview {
+    pub file_id: i32,
+    /// Set when the file is already downloaded.
+    pub local_path: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Media {
+    /// Full-size file, opened with `o`.
     pub file_id: i32,
     pub kind: MediaKind,
+    pub preview: Option<Preview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SendState {
+    #[default]
+    Sent,
+    Pending,
+    Failed(String),
 }
 
 /// A local file queued for sending.
@@ -65,6 +83,7 @@ pub struct Message {
     pub is_read: bool,
     pub reply_to: Option<ReplyInfo>,
     pub media: Option<Media>,
+    pub send_state: SendState,
 }
 
 /// `HH:MM` for messages.

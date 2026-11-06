@@ -85,6 +85,8 @@ pub struct Theme {
     pub success: Style,
     /// Status messages, "connecting…".
     pub warning: Style,
+    /// Failed sends.
+    pub error: Style,
     /// Fuzzy finder border, chat type tags.
     pub highlight: Style,
     pub highlight_alt: Style,
@@ -138,6 +140,7 @@ impl Theme {
             accent: fg(p.accent),
             success: fg(p.green),
             warning: fg(p.yellow),
+            error: fg(p.red).add_modifier(Modifier::BOLD),
             highlight: fg(p.magenta_light),
             highlight_alt: fg(p.magenta),
             chip: Style::default().bg(p.chip_bg).fg(p.chip_fg),

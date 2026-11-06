@@ -23,6 +23,10 @@ pub enum BackendEvent {
     Error(String),
     /// Informational message for the status bar.
     Status(String),
+    /// A file requested with `download_file` finished downloading.
+    FileDownloaded { file_id: i32, path: PathBuf },
+    /// An inline image finished decoding (sent by the app's own worker).
+    ImageDecoded { file_id: i32, result: std::result::Result<crate::images::DecodedImage, String> },
 }
 
 #[async_trait::async_trait]
@@ -38,6 +42,11 @@ pub trait TelegramBackend: Send + Sync {
     /// Download a media file (blocking until done) and return its local path.
     async fn download_media(&self, _file_id: i32) -> Result<PathBuf> {
         Err(anyhow!("media download is not supported by this backend"))
+    }
+    /// Start downloading a file in the background; completion is reported
+    /// with `BackendEvent::FileDownloaded`.
+    async fn download_file(&self, _file_id: i32) -> Result<()> {
+        Ok(())
     }
     async fn send_message(&self, chat_id: i64, text: String, reply_to_id: Option<i64>) -> Result<()>;
     /// Send a local file as photo/document with an optional caption.

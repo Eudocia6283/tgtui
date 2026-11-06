@@ -14,6 +14,7 @@ A modern, minimalist, vim-inspired Telegram TUI client built in Rust with Ratatu
   - `INSERT` mode: Fast typing with suspended quote banner and dynamic prompt hints.
   - `FUZZY` finder: Telescope-style floating popup (`/` or `<Space>f`) to jump between dialogs in real time.
 - **💬 Chat Bubbles**: Every message is drawn in a bordered bubble — your own on the right, others on the left.
+- **🖼️ Inline Images (kitty)**: Photos, stickers and video/file thumbnails are shown right inside the bubbles via the kitty graphics protocol (Unicode placeholders, so they scroll with the text). Other terminals fall back to `[Photo]` labels.
 - **🐧 Pure Wayland Integration**:
   - `wl-copy` & `wl-paste` native hooks.
   - Media opening via lightweight Wayland tools (`imv`, `swayimg`, `mpv`); falls back to `xdg-open`.

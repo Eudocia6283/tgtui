@@ -32,13 +32,20 @@ pub async fn handle_event(app: &mut App, event: AppEvent) -> Result<()> {
 
 async fn handle_backend_event(app: &mut App, evt: BackendEvent) -> Result<()> {
     match evt {
-        BackendEvent::NewMessage(msg) => app.add_message(msg),
-        BackendEvent::MessageUpdated { old_id, message } => app.update_message(old_id, message),
+        BackendEvent::NewMessage(msg) => {
+            app.add_message(msg);
+            app.ensure_previews().await;
+        }
+        BackendEvent::MessageUpdated { old_id, message } => {
+            app.update_message(old_id, message);
+            app.ensure_previews().await;
+        }
         BackendEvent::MessagesDeleted { chat_id, message_ids } => app.remove_messages(chat_id, &message_ids),
         BackendEvent::OutboxRead { chat_id, message_id } => app.mark_outbox_read(chat_id, message_id),
         BackendEvent::History { chat_id, messages } => {
             app.apply_history(chat_id, messages);
             app.mark_active_read().await;
+            app.ensure_previews().await;
         }
         BackendEvent::ChatUpdated(chat) => {
             let is_active = Some(chat.id) == app.active_chat_id();
@@ -51,6 +58,8 @@ async fn handle_backend_event(app: &mut App, evt: BackendEvent) -> Result<()> {
         BackendEvent::ConnectionStatus(label) => app.connection = label,
         BackendEvent::Error(e) => app.set_status(format!("Telegram error: {e}")),
         BackendEvent::Status(msg) => app.set_status(msg),
+        BackendEvent::FileDownloaded { file_id, path } => app.preview_downloaded(file_id, path),
+        BackendEvent::ImageDecoded { file_id, result } => app.images.decoded(file_id, result),
     }
     Ok(())
 }

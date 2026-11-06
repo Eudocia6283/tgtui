@@ -53,6 +53,7 @@ fn msg(id: i64, chat_id: i64, sender: &str, text: &str, time: &str, reply_to: Op
         is_read: true,
         reply_to,
         media: None,
+        send_state: SendState::Sent,
     }
 }
 
@@ -75,7 +76,7 @@ impl MockBackend {
                 msg(1, 1, "Me", "Welcome to telegram-tui demo mode! Press ? for keybindings.", "11:58", None),
                 msg(2, 1, "Me", "TODO: update niri configuration", "12:02", None),
                 Message {
-                    media: Some(Media { file_id: 1, kind: MediaKind::Image }),
+                    media: Some(Media { file_id: 1, kind: MediaKind::Image, preview: None }),
                     ..msg(3, 1, "Me", "[Photo] niri screenshot (press o to open)", "12:05", None)
                 },
             ],
@@ -138,6 +139,7 @@ impl MockBackend {
             is_read: false,
             reply_to,
             media: None,
+            send_state: SendState::Sent,
         };
 
         list.push(new_msg.clone());
