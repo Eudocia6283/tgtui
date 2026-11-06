@@ -75,8 +75,9 @@ fn bubble<'a>(
         header.push(match msg.send_state {
             SendState::Pending => Span::styled(" ⏳", theme.text_muted),
             SendState::Failed(_) => Span::styled(" ✗", theme.error),
-            SendState::Sent if msg.is_read => Span::styled(" ✓✓", theme.accent),
-            SendState::Sent => Span::styled(" ✓", theme.accent),
+            // Read by the peer: two ticks in the accent color; delivered: one dim tick.
+            SendState::Sent if msg.is_read => Span::styled(" ✓✓", theme.accent.add_modifier(Modifier::BOLD)),
+            SendState::Sent => Span::styled(" ✓", theme.text_muted),
         });
     } else {
         let name = truncate_str(&msg.sender_name, max_bubble.saturating_sub(13).max(1));

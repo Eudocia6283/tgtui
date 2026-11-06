@@ -881,6 +881,10 @@ fn apply_positions(chat: &mut Chat, positions: &Value) {
 
 fn build_chat(st: &mut State, c: &Value) -> Chat {
     let id = c["id"].as_i64().unwrap_or(0);
+    // Initial read receipt position; later changes come via updateChatReadOutbox.
+    if let Some(last_read) = c["last_read_outbox_message_id"].as_i64() {
+        st.outbox_read.insert(id, last_read);
+    }
     let mut username = None;
     let chat_type = match c["type"]["@type"].as_str().unwrap_or("") {
         "chatTypePrivate" | "chatTypeSecret" => {
@@ -1149,5 +1153,51 @@ fn upsert_message(list: &mut Vec<Message>, msg: Message) -> bool {
             list.insert(i, msg);
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn outgoing(chat_id: i64, id: i64) -> Value {
+        json!({
+            "@type": "message", "id": id, "chat_id": chat_id, "is_outgoing": true, "date": 0,
+            "sender_id": { "@type": "messageSenderUser", "user_id": 1 },
+            "content": { "@type": "messageText", "text": { "@type": "formattedText", "text": "hi" } }
+        })
+    }
+
+    #[test]
+    fn read_receipts_use_initial_chat_state() {
+        let mut st = State::default();
+        build_chat(&mut st, &json!({
+            "@type": "chat", "id": 7, "title": "Bob",
+            "type": { "@type": "chatTypePrivate", "user_id": 2 },
+            "last_read_outbox_message_id": 100
+        }));
+        assert!(parse_message(&st, &outgoing(7, 100)).is_read, "read by peer -> two ticks");
+        assert!(!parse_message(&st, &outgoing(7, 101)).is_read, "newer -> one tick");
+        // Incoming messages are never shown with ticks, but count as read.
+        let mut incoming = outgoing(7, 200);
+        incoming["is_outgoing"] = json!(false);
+        assert!(parse_message(&st, &incoming).is_read);
+    }
+
+    #[test]
+    fn photo_messages_get_inline_preview() {
+        let size = |w: u32, id: i32| json!({
+            "type": "x", "width": w, "height": w,
+            "photo": { "id": id, "local": { "is_downloading_completed": false, "path": "" } }
+        });
+        let content = json!({
+            "@type": "messagePhoto",
+            "photo": { "sizes": [size(90, 1), size(320, 2), size(800, 3), size(1280, 4)] },
+            "caption": { "text": "cat" }
+        });
+        let media = content_media(&content).unwrap();
+        assert_eq!(media.file_id, 4, "o opens the largest size");
+        assert_eq!(media.preview.unwrap().file_id, 3, "inline uses the largest <= 800px");
+        assert_eq!(content_text(&content), "[Photo] cat");
     }
 }

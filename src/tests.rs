@@ -296,3 +296,23 @@ async fn ui_uses_no_emoji() {
     assert!(s.contains("\u{f435}") && s.contains("\u{f1f6}"), "{s}");
 }
 
+
+#[tokio::test]
+async fn ticks_switch_from_sent_to_read() {
+    let (mut app, mut rx) = setup().await;
+    app.switch_chat(1).await.unwrap();
+    chars(&mut app, "iping").await;
+    key(&mut app, KeyCode::Enter, KeyModifiers::NONE).await;
+    pump(&mut app, &mut rx).await;
+    let last = app.messages.last().unwrap().clone();
+    assert!(!last.is_read);
+    let tick_line = |s: &str| s.lines().find(|l| l.contains(&format!("─ {} ", last.time_str)) && l.contains('✓')).map(str::to_string);
+    let before = tick_line(&screen(&app, 110, 30)).unwrap();
+    assert!(before.contains(" ✓ ") && !before.contains("✓✓"), "{before}");
+
+    handle_event(&mut app, AppEvent::Backend(BackendEvent::OutboxRead { chat_id: last.chat_id, message_id: last.id }))
+        .await
+        .unwrap();
+    let after = tick_line(&screen(&app, 110, 30)).unwrap();
+    assert!(after.contains("✓✓"), "{after}");
+}
