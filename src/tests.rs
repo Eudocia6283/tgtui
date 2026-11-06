@@ -146,7 +146,8 @@ async fn own_messages_right_others_left_in_bubbles() {
     let s = screen(&app, 110, 30);
     let col = |needle: &str| {
         let line = s.lines().find(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle} missing:\n{s}"));
-        line.find(needle).unwrap()
+        // Column in cells (screen() emits one char per cell), not bytes.
+        line[..line.find(needle).unwrap()].chars().count()
     };
     // Others start near the left edge of the pane, own messages are pushed right.
     assert!(col("Yep, writing") > col("Works like magic") + 10, "{s}");
@@ -261,4 +262,16 @@ async fn failed_send_is_shown_in_bubble() {
     app.update_message(old, m);
     let s = screen(&app, 110, 30);
     assert!(s.contains("✗") && s.contains("PHOTO_INVALID_DIMENSIONS"), "{s}");
+}
+
+#[tokio::test]
+async fn chat_list_has_separators_between_chats() {
+    let (app, _rx) = setup().await;
+    let s = screen(&app, 110, 30);
+    // Left pane is 30 columns wide: a separator spans its inner width (28).
+    let separators = s
+        .lines()
+        .filter(|l| l.starts_with('│') && l.chars().skip(1).take(28).all(|c| c == '─'))
+        .count();
+    assert_eq!(separators, 5, "6 chats -> 5 separators, none after the last:\n{s}");
 }

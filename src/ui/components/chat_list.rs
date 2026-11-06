@@ -99,7 +99,12 @@ pub fn render(
             } else {
                 Style::default()
             };
-            ListItem::new(vec![line1, line2]).style(item_style)
+            // Highlight only the two text lines so the separator stays plain.
+            let mut lines = vec![line1.style(item_style), line2.style(item_style)];
+            if i + 1 < chats.len() {
+                lines.push(Line::styled("─".repeat(inner_width), theme.border_normal));
+            }
+            ListItem::new(lines)
         })
         .collect();
 
