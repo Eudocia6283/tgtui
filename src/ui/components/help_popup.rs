@@ -18,7 +18,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from("  h / l       : Switch pane between Chats and Messages"),
         Line::from("  G / gg      : Jump to latest / oldest message (loads more)"),
         Line::from("  r           : Reply to selected message (mounts quote)"),
-        Line::from("  y           : Yank (copy) message text to clipboard"),
+        Line::from("  y / Y       : Yank message (image / file / text) / text only"),
         Line::from("  o           : Open photo / file of selected message"),
         Line::from("  d           : Delete selected message (asks to confirm)"),
         Line::from("  i / a       : Enter INSERT mode to type a message"),

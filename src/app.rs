@@ -426,13 +426,54 @@ impl App {
         }
     }
 
+    /// `y`: copy the selected message's media (image data, or the file as a
+    /// `text/uri-list` like file managers do); plain text otherwise.
     pub fn copy_selected_to_clipboard(&mut self) {
-        let Some(text) = self.messages.get(self.selected_msg_idx).map(|m| m.text.clone()) else {
+        let Some(msg) = self.messages.get(self.selected_msg_idx) else {
             return;
         };
-        match spawn_command(&self.config.wayland.copy_command, &[], Some(text)) {
-            Ok(()) => self.set_status("Yanked message to clipboard"),
-            Err(e) => self.set_status(format!("Copy failed ({}): {e}", self.config.wayland.copy_command)),
+        let Some(media) = msg.media.clone() else {
+            self.copy_selected_text();
+            return;
+        };
+        let backend = self.backend.clone();
+        let tx = self.events_tx.clone();
+        let copy_cmd = self.config.wayland.copy_command.clone();
+        self.set_status("Downloading media to yank…");
+        tokio::spawn(async move {
+            let status = match backend.download_media(media.file_id).await {
+                Ok(path) => {
+                    let payload =
+                        tokio::task::spawn_blocking(move || clipboard_payload(&path, media.kind)).await;
+                    match payload {
+                        Ok(Ok(p)) => match copy_to_clipboard(&copy_cmd, p.mime, p.data) {
+                            Ok(()) => format!("Yanked {} to clipboard", p.what),
+                            Err(e) => format!("Copy failed ({copy_cmd}): {e:#}"),
+                        },
+                        Ok(Err(e)) => format!("Copy failed: {e:#}"),
+                        Err(e) => format!("Copy failed: {e}"),
+                    }
+                }
+                Err(e) => format!("Media download failed: {e}"),
+            };
+            let _ = tx.send(BackendEvent::Status(status));
+        });
+    }
+
+    /// `Y`: copy only the text (for media messages: the caption).
+    pub fn copy_selected_text(&mut self) {
+        let Some(msg) = self.messages.get(self.selected_msg_idx) else {
+            return;
+        };
+        let text = if msg.media.is_some() { strip_media_label(&msg.text) } else { msg.text.as_str() }.to_string();
+        if text.is_empty() {
+            self.set_status("Nothing to yank: message has no text");
+            return;
+        }
+        let cmd = self.config.wayland.copy_command.clone();
+        match copy_to_clipboard(&cmd, "text/plain;charset=utf-8", text.into_bytes()) {
+            Ok(()) => self.set_status("Yanked text to clipboard"),
+            Err(e) => self.set_status(format!("Copy failed ({cmd}): {e:#}")),
         }
     }
 
@@ -600,7 +641,7 @@ fn split_command(line: &str) -> Result<(&str, std::str::SplitWhitespace<'_>)> {
 
 /// Spawn a helper without touching the TUI's stdout/stderr, optionally feeding
 /// `stdin`, and reap it in the background so it doesn't linger as a zombie.
-fn spawn_command(line: &str, extra_args: &[String], stdin: Option<String>) -> Result<()> {
+fn spawn_command(line: &str, extra_args: &[String], stdin: Option<Vec<u8>>) -> Result<()> {
     let (program, args) = split_command(line)?;
     let mut child = Command::new(program)
         .args(args)
@@ -610,12 +651,67 @@ fn spawn_command(line: &str, extra_args: &[String], stdin: Option<String>) -> Re
         .stderr(Stdio::null())
         .spawn()?;
     std::thread::spawn(move || {
-        if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
-            let _ = pipe.write_all(text.as_bytes());
+        if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
+            let _ = pipe.write_all(&data);
         }
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// "[Photo] caption" -> "caption".
+pub fn strip_media_label(text: &str) -> &str {
+    match text.strip_prefix('[').and_then(|t| t.split_once(']')) {
+        Some((_, rest)) => rest.trim_start(),
+        None => text,
+    }
+}
+
+struct ClipboardPayload {
+    mime: &'static str,
+    data: Vec<u8>,
+    what: &'static str,
+}
+
+/// Images become PNG data (what most apps accept on paste); other files a
+/// `text/uri-list`, so they paste into file managers or back into a chat.
+fn clipboard_payload(path: &Path, kind: MediaKind) -> Result<ClipboardPayload> {
+    if kind == MediaKind::Image {
+        if let Ok(img) = image::open(path) {
+            let mut data = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut data), image::ImageFormat::Png)?;
+            return Ok(ClipboardPayload { mime: "image/png", data, what: "image" });
+        }
+    }
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let uri = format!("file://{}\r\n", percent_encode(&path.to_string_lossy()));
+    Ok(ClipboardPayload { mime: "text/uri-list", data: uri.into_bytes(), what: "file" })
+}
+
+/// Pipe `data` into the copy command, telling it the MIME type when we
+/// know how (wl-copy / xclip); other commands just get the bytes.
+fn copy_to_clipboard(line: &str, mime: &str, data: Vec<u8>) -> Result<()> {
+    let (program, _) = split_command(line)?;
+    let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or(program);
+    let type_args: Vec<String> = match name {
+        "wl-copy" => vec!["--type".into(), mime.into()],
+        "xclip" => vec!["-t".into(), mime.into()],
+        _ => Vec::new(),
+    };
+    spawn_command(line, &type_args, Some(data))
+}
+
+/// Percent-encode a path for a file:// URI (keeps `/` and unreserved bytes).
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Run a helper command and capture its stdout (fails on non-zero exit).
@@ -716,11 +812,9 @@ mod tests {
         pub struct Dir(pub std::path::PathBuf);
         impl Dir {
             pub fn new() -> Self {
-                let p = std::env::temp_dir().join(format!(
-                    "tgtui-test-{}-{:?}",
-                    std::process::id(),
-                    std::thread::current().id()
-                ));
+                static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let p = std::env::temp_dir().join(format!("tgtui-test-{}-{n}", std::process::id()));
                 std::fs::create_dir_all(&p).unwrap();
                 Dir(p)
             }
@@ -769,6 +863,56 @@ mod tests {
         .unwrap();
         app.paste_from_clipboard();
         assert_eq!(app.input_buffer, "hello");
+    }
+
+    #[test]
+    fn percent_encoding_roundtrips() {
+        let p = "/home/u/My File 你好#1.pdf";
+        let enc = percent_encode(p);
+        assert_eq!(enc, "/home/u/My%20File%20%E4%BD%A0%E5%A5%BD%231.pdf");
+        assert_eq!(percent_decode(&enc), p);
+    }
+
+    #[test]
+    fn clipboard_payload_for_image_and_file() {
+        let d = tempdir::Dir::new();
+        let jpg = d.0.join("photo.jpg");
+        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3])).save(&jpg).unwrap();
+        let p = clipboard_payload(&jpg, MediaKind::Image).unwrap();
+        assert_eq!(p.mime, "image/png");
+        let png = image::load_from_memory(&p.data).unwrap();
+        assert_eq!((png.width(), png.height()), (4, 3));
+
+        let doc = d.0.join("a b.pdf");
+        std::fs::write(&doc, "x").unwrap();
+        let p = clipboard_payload(&doc, MediaKind::File).unwrap();
+        assert_eq!(p.mime, "text/uri-list");
+        let uri = String::from_utf8(p.data).unwrap();
+        assert!(uri.starts_with("file:///") && uri.ends_with("a%20b.pdf\r\n"), "{uri}");
+
+        // An "image" that can't be decoded is still yanked, as a file.
+        let bogus = d.0.join("x.webm");
+        std::fs::write(&bogus, "not an image").unwrap();
+        assert_eq!(clipboard_payload(&bogus, MediaKind::Image).unwrap().mime, "text/uri-list");
+    }
+
+    #[test]
+    fn copy_passes_mime_type_to_wl_copy() {
+        let d = tempdir::Dir::new();
+        let bin = d.0.join("wl-copy");
+        let log = d.0.join("log");
+        std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" > {0}.args\ncat > {0}.data\n", log.display())).unwrap();
+        std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        copy_to_clipboard(&bin.to_string_lossy(), "image/png", b"DATA".to_vec()).unwrap();
+        let args = log.with_extension("args");
+        for _ in 0..100 {
+            if std::fs::read(log.with_extension("data")).is_ok_and(|d| d == b"DATA") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(std::fs::read_to_string(args).unwrap().trim(), "--type image/png");
+        assert_eq!(std::fs::read(log.with_extension("data")).unwrap(), b"DATA");
     }
 
     #[test]

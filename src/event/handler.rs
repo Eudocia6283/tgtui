@@ -166,6 +166,7 @@ async fn handle_normal_keys(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char(' ') => app.pending_key = Some(' '),
         KeyCode::Char('r') => app.mount_reply_to_selected(),
         KeyCode::Char('y') => app.copy_selected_to_clipboard(),
+        KeyCode::Char('Y') => app.copy_selected_text(),
         KeyCode::Char('o') => app.open_selected_media(),
         KeyCode::Char('d') => {
             if app.messages.get(app.selected_msg_idx).is_some() {

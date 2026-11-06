@@ -1,3 +1,4 @@
+use crate::app::strip_media_label;
 use crate::backend::model::{Chat, MediaKind, Message, SendState};
 use crate::images::ImageStore;
 use crate::ui::kitty;
@@ -18,14 +19,6 @@ const BUBBLE_MAX_PERCENT: usize = 75;
 const BUBBLE_MIN_WIDTH: usize = 16;
 /// Tallest inline image, in rows.
 const IMAGE_MAX_ROWS: usize = 15;
-
-/// "[Photo] caption" -> "caption" (the image itself replaces the label).
-fn strip_media_label(text: &str) -> &str {
-    match text.strip_prefix('[').and_then(|t| t.split_once(']')) {
-        Some((_, rest)) => rest.trim_start(),
-        None => text,
-    }
-}
 
 struct Corners {
     tl: &'static str,

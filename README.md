@@ -59,7 +59,8 @@ On the first run, the client will prompt for your phone number, the verification
 | `h` / `l` / `<Enter>` | Switch pane focus between **Chats** and **Messages** (focusing messages marks the chat read) |
 | `G` / `gg` | Jump to newest / oldest message in history |
 | `r` | **Reply** to highlighted message (mounts quote card and enters INSERT) |
-| `y` | **Yank** (copy) message text directly to Wayland clipboard via `wl-copy` |
+| `y` | **Yank** to the Wayland clipboard via `wl-copy`: images as PNG data, other files as `text/uri-list` (pastes into file managers / back into a chat), text otherwise |
+| `Y` | Yank only the text (for media messages: the caption) |
 | `o` | **Open** the photo/file of the selected message (`image_viewer` for images, `open_command` otherwise) |
 | `d` | Delete selected message (with confirmation prompt) |
 | `i` / `a` | Enter **INSERT** mode to type a message |
