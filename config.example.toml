@@ -24,6 +24,9 @@ single_column_breakpoint = 80
 # Width percentage of left chat list in dual-column mode
 chats_ratio_percent = 28
 
+# Use Nerd Font icons (pin, mute, files, chat types); false = plain Unicode symbols
+nerd_font = true
+
 # Show photos/thumbnails inline in kitty (graphics protocol); ignored elsewhere
 inline_images = true
 

@@ -58,17 +58,22 @@ pub fn render(
             } else {
                 ("  ", theme.text_muted, theme.text_normal)
             };
-            let pin_icon = if chat.is_pinned { "📌 " } else { "" };
-            let right1 = format!("{}{}", if chat.is_muted { "🔕 " } else { "" }, chat.last_message_time);
-            let max_name = inner_width
-                .saturating_sub(marker.width() + pin_icon.width() + right1.width() + 1);
+            let icons = &theme.icons;
+            let pin_icon = if chat.is_pinned { format!("{} ", icons.pin) } else { String::new() };
+            let mute_icon = if chat.is_muted { format!("{} ", icons.muted) } else { String::new() };
+            let max_name = inner_width.saturating_sub(
+                marker.width() + pin_icon.width() + mute_icon.width() + chat.last_message_time.width() + 1,
+            );
             let line1 = justify(
                 vec![
                     Span::styled(marker, marker_style),
-                    Span::raw(pin_icon),
+                    Span::styled(pin_icon, theme.accent),
                     Span::styled(truncate_str(&chat.title, max_name), name_style),
                 ],
-                vec![Span::styled(right1, theme.text_muted)],
+                vec![
+                    Span::styled(mute_icon, theme.text_muted),
+                    Span::styled(chat.last_message_time.as_str(), theme.text_muted),
+                ],
                 inner_width,
             );
 
@@ -102,7 +107,10 @@ pub fn render(
             // Highlight only the two text lines so the separator stays plain.
             let mut lines = vec![line1.style(item_style), line2.style(item_style)];
             if i + 1 < chats.len() {
-                lines.push(Line::styled("─".repeat(inner_width), theme.border_normal));
+                lines.push(Line::styled(
+                    "┄".repeat(inner_width),
+                    theme.border_normal.add_modifier(Modifier::DIM),
+                ));
             }
             ListItem::new(lines)
         })

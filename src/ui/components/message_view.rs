@@ -1,4 +1,4 @@
-use crate::backend::model::{Chat, Message, SendState};
+use crate::backend::model::{Chat, MediaKind, Message, SendState};
 use crate::images::ImageStore;
 use crate::ui::kitty;
 use crate::ui::theme::Theme;
@@ -71,7 +71,11 @@ fn bubble<'a>(
     let body_style = if is_selected { theme.text_bold } else { theme.text_normal };
 
     // Header shown in the top border.
-    let media_icon = if msg.media.is_some() { "📎 " } else { "" };
+    let media_icon = match msg.media.as_ref().map(|m| m.kind) {
+        Some(MediaKind::Image) => format!("{} ", theme.icons.image),
+        Some(MediaKind::File) => format!("{} ", theme.icons.attachment),
+        None => String::new(),
+    };
     let mut header: Vec<Span> = Vec::new();
     if msg.is_outgoing {
         header.push(Span::styled(format!("{media_icon}{}", msg.time_str), theme.text_muted));
@@ -106,7 +110,7 @@ fn bubble<'a>(
     let text = if image.is_some() { strip_media_label(&msg.text) } else { msg.text.as_str() };
     let mut body = if text.is_empty() { Vec::new() } else { wrap_text(text, max_content) };
     let failure = match &msg.send_state {
-        SendState::Failed(e) => wrap_text(&format!("⚠ {e}"), max_content),
+        SendState::Failed(e) => wrap_text(&format!("{} {e}", theme.icons.warning), max_content),
         _ => Vec::new(),
     };
     if body.is_empty() && image.is_none() {

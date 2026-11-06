@@ -63,15 +63,16 @@ pub fn render(
         let names: Vec<String> = attachments
             .iter()
             .map(|a| {
-                let icon = if a.kind == MediaKind::Image { "🖼 " } else { "📄 " };
+                let icon = if a.kind == MediaKind::Image { theme.icons.image } else { theme.icons.file };
                 let name = a.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                format!("{icon}{name}")
+                format!("{icon} {name}")
             })
             .collect();
         let hint = "  [Enter: send · text = caption]";
-        let max_names = width.saturating_sub("📎 ".width() + hint.width());
+        let clip = format!("{} ", theme.icons.attachment);
+        let max_names = width.saturating_sub(clip.width() + hint.width());
         lines.push(Line::from(vec![
-            Span::styled("📎 ", theme.accent),
+            Span::styled(clip, theme.accent),
             Span::styled(truncate_str(&names.join(", "), max_names), theme.highlight),
             Span::styled(hint, theme.text_muted),
         ]));

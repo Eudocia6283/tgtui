@@ -1,4 +1,5 @@
 pub mod components;
+pub mod icons;
 pub mod kitty;
 pub mod theme;
 pub mod utils;

@@ -271,7 +271,28 @@ async fn chat_list_has_separators_between_chats() {
     // Left pane is 30 columns wide: a separator spans its inner width (28).
     let separators = s
         .lines()
-        .filter(|l| l.starts_with('│') && l.chars().skip(1).take(28).all(|c| c == '─'))
+        .filter(|l| l.starts_with('│') && l.chars().skip(1).take(28).all(|c| c == '┄'))
         .count();
     assert_eq!(separators, 5, "6 chats -> 5 separators, none after the last:\n{s}");
 }
+
+#[tokio::test]
+async fn ui_uses_no_emoji() {
+    let (mut app, _rx) = setup().await;
+    let is_emoji = |c: char| matches!(c as u32, 0x1F000..=0x1FFFF | 0x2600..=0x26FF);
+    for keys in ["", "/", "\u{1b}?"] {
+        for c in keys.chars() {
+            let code = if c == '\u{1b}' { KeyCode::Esc } else { KeyCode::Char(c) };
+            key(&mut app, code, KeyModifiers::NONE).await;
+        }
+        let s = screen(&app, 120, 40);
+        // Message text may contain emoji; the chrome must not.
+        let found: Vec<char> = s.chars().filter(|&c| is_emoji(c)).collect();
+        assert!(found.is_empty(), "emoji {found:?} after {keys:?}:\n{s}");
+    }
+    // Nerd Font icons are used for pin / mute (Saved Messages is pinned, Noctalia muted).
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE).await;
+    let s = screen(&app, 120, 40);
+    assert!(s.contains("\u{f435}") && s.contains("\u{f1f6}"), "{s}");
+}
+

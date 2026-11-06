@@ -1,4 +1,5 @@
 use crate::config::UiConfig;
+use crate::ui::icons::Icons;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::BorderType;
 
@@ -93,6 +94,7 @@ pub struct Theme {
     /// Active chat chip in the status bar.
     pub chip: Style,
     pub border_type: BorderType,
+    pub icons: Icons,
 }
 
 impl Theme {
@@ -106,6 +108,7 @@ impl Theme {
         let tag = |bg: Color, fg: Color| Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD);
 
         Self {
+            icons: Icons::new(ui.nerd_font),
             border_type: if ui.rounded_borders {
                 BorderType::Rounded
             } else {

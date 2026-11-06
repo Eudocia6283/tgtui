@@ -36,6 +36,9 @@ pub struct UiConfig {
     pub single_column_breakpoint: u16,
     #[serde(default = "default_ratio")]
     pub chats_ratio_percent: u16,
+    /// Use Nerd Font glyphs for icons; false = plain Unicode symbols.
+    #[serde(default = "default_true")]
+    pub nerd_font: bool,
     /// Show photos inline (kitty graphics protocol; ignored on other terminals).
     #[serde(default = "default_true")]
     pub inline_images: bool,
@@ -100,6 +103,7 @@ impl Default for UiConfig {
             rounded_borders: true,
             single_column_breakpoint: default_breakpoint(),
             chats_ratio_percent: default_ratio(),
+            nerd_font: true,
             inline_images: true,
         }
     }

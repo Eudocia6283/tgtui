@@ -72,14 +72,14 @@ pub fn render(
                 ("  ", theme.text_muted, theme.text_normal, Style::default())
             };
             let icon = match chat.chat_type {
-                ChatType::Group => "💬",
-                ChatType::Channel => "📢",
-                ChatType::Bot => "🤖",
-                ChatType::Direct => "👤",
+                ChatType::Group => theme.icons.group,
+                ChatType::Channel => theme.icons.channel,
+                ChatType::Bot => theme.icons.bot,
+                ChatType::Direct => theme.icons.user,
             };
             let mut spans = vec![
                 Span::styled(prefix, prefix_style),
-                Span::raw(format!("{icon} ")),
+                Span::styled(format!("{icon} "), theme.accent),
                 Span::styled(chat.title.as_str(), title_style),
             ];
             if let Some(u) = &chat.username {
