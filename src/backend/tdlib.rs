@@ -117,7 +117,7 @@ impl TdlibBackend {
                 .or_else(|_| Library::new("libtdjson.so"))
                 .map_err(|e| {
                     anyhow!(
-                        "Could not load libtdjson.so. Tried:\n  {}\n  /usr/lib/libtdjson.so\n  libtdjson.so\nOn Arch Linux install the AUR package `telegram-tdlib`, or place libtdjson.so in ~/.local/share/telegram-tui/tdlib-lib.\nError: {}",
+                        "Could not load libtdjson.so. Tried:\n  {}\n  /usr/lib/libtdjson.so\n  libtdjson.so\nInstall TDLib (on Arch e.g. from the AUR), or place libtdjson.so in ~/.local/share/telegram-tui/tdlib-lib.\nError: {}",
                         local_tdlib.display(),
                         e
                     )

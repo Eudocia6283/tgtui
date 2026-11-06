@@ -1,39 +1,62 @@
-# telegram-tui
+# tgtui
 
-A modern, minimalist, vim-inspired Telegram TUI client built in Rust with Ratatui, specifically crafted for **Arch Linux + niri (scrollable-tiling Wayland) + fish + noctalia**.
+A minimalist, vim-inspired Telegram client for the terminal, written in Rust with
+[Ratatui](https://ratatui.rs) on top of the official [TDLib](https://core.telegram.org/tdlib).
+Built for **Arch Linux + niri (scrollable-tiling Wayland) + kitty + Noctalia**, but works in any
+terminal.
 
----
-
-## ✨ Features
-
-- **🌐 Real Telegram MTProto Support via TDLib**: Connects to official Telegram servers via Arch Linux's official `libtdjson.so` (`sudo pacman -S tdlib`).
-- **🎨 Terminal 16-Color Pure & Transparent**: Zero hardcoded hex colors. Inherits your terminal palette (ANSI 16 colors) and background transparency (seamlessly matching pywal, base16, and Noctalia themes).
-- **📐 Responsive niri Column Mode**: Automatically adapts between dual-column view (Chats + Messages) and single-column compact view when niri columns scale below 80 characters.
-- **⚡ Vim-Centric Modal UX**:
-  - `NORMAL` mode: `j`/`k` message navigation, `r` instant quote reply, `y` yank to Wayland clipboard, `e` launch Neovim.
-  - `INSERT` mode: Fast typing with suspended quote banner and dynamic prompt hints.
-  - `FUZZY` finder: Telescope-style floating popup (`/` or `<Space>f`) to jump between dialogs in real time.
-- **💬 Chat Bubbles**: Every message is drawn in a bordered bubble — your own on the right, others on the left.
-- **🖼️ Inline Images (kitty)**: Photos, stickers and video/file thumbnails are shown right inside the bubbles via the kitty graphics protocol (Unicode placeholders, so they scroll with the text). Other terminals fall back to `[Photo]` labels.
-- **🐧 Pure Wayland Integration**:
-  - `wl-copy` & `wl-paste` native hooks.
-  - Media opening via lightweight Wayland tools (`imv`, `swayimg`, `mpv`); falls back to `xdg-open`.
-  - Paste screenshots / copied files straight into a chat with `<C-v>`.
-- **🛡️ Crash-Resilient**: Embedded panic hooks ensure terminal raw mode and alternate screen are always cleanly restored.
+The crate and binary are called `telegram-tui`.
 
 ---
 
-## 🚀 Connecting to Real Telegram (Arch Linux)
+## Features
 
-### 1. Install System TDLib
+- **Real Telegram account** via TDLib (`libtdjson.so`, loaded at runtime): chats, history,
+  replies, edits, deletions, read receipts (`✓` delivered / `✓✓` read), send failures shown inline.
+- **Vim-style modal UI**: `NORMAL`, `INSERT` and a Telescope-like fuzzy chat finder.
+- **Chat bubbles**: bordered messages, yours on the right and everyone else's on the left.
+- **Inline images in kitty**: photos, stickers and video/file thumbnails are drawn inside the
+  bubbles with the kitty graphics protocol (Unicode placeholders, so they scroll with the text).
+  Other terminals show `[Photo]` labels instead.
+- **Media**: paste screenshots or copied files with `<C-v>`, yank images/files with `y`, open
+  them with `o`.
+- **Background service**: keeps Telegram connected after you close the TUI and sends desktop
+  notifications (one per chat, with *Open*, *Mark as read* and inline *Reply*). Reopening the
+  TUI restores where you left off.
+- **Fits your desktop**: inherits the terminal's 16-color palette and transparency (pywal,
+  base16, Noctalia), uses Nerd Font icons, switches to a single column on narrow niri columns.
+
+---
+
+## Requirements
+
+- Linux with a recent Rust toolchain (`cargo`) to build.
+- **TDLib** (`libtdjson.so`). It is looked up, in order, at
+  `~/.local/share/telegram-tui/tdlib-lib/libtdjson.so`, `/usr/lib/libtdjson.so`, then the
+  dynamic loader path. On Arch it is available from the AUR (e.g. `telegram-tdlib`), or build
+  it from [source](https://github.com/tdlib/td) and copy `libtdjson.so` to the first path.
+- A Telegram `api_id` / `api_hash` from <https://my.telegram.org> ("API development tools").
+- Optional: `wl-clipboard` (`wl-copy` / `wl-paste`), a Nerd Font (icons), kitty (inline
+  images), a notification server such as Noctalia (notifications), `imv` / `xdg-open` (`o`).
+
+Without credentials (or with `--demo`) the client runs in an offline demo mode with mock chats.
+
+---
+
+## Install
+
 ```fish
-sudo pacman -S tdlib
+git clone https://github.com/Eudocia6283/tgtui
+cd tgtui
+cargo install --path .          # installs ~/.cargo/bin/telegram-tui
+
+mkdir -p ~/.config/telegram-tui
+cp config.example.toml ~/.config/telegram-tui/config.toml
+cp completions/telegram-tui.fish ~/.config/fish/completions/   # optional
 ```
 
-### 2. Configure Your API Credentials
-Get your `api_id` and `api_hash` from [https://my.telegram.org](https://my.telegram.org) under "API development tools".
+Then set your credentials in `~/.config/telegram-tui/config.toml`:
 
-Edit `~/.config/telegram-tui/config.toml`:
 ```toml
 [telegram]
 api_id = 12345678
@@ -41,15 +64,13 @@ api_hash = "your_32_character_api_hash_here"
 session_path = "~/.local/share/telegram-tui/tdlib"
 ```
 
-### 3. Launch and Authenticate
-```fish
-cargo run --release
-```
-On the first run, the client will prompt for your phone number, the verification code sent to your Telegram app, and your 2FA password (if enabled). After logging in once, your session is saved locally in SQLite and all subsequent starts will connect instantly!
+Run `telegram-tui`. The first start asks for your phone number, the login code and your 2FA
+password (if any); the session is then stored under `session_path` and later starts connect
+right away. Try the UI without an account with `telegram-tui --demo`.
 
 ---
 
-## ⌨️ Vim Keybindings
+## Keybindings
 
 ### NORMAL Mode (Navigation & Control)
 
@@ -64,7 +85,7 @@ On the first run, the client will prompt for your phone number, the verification
 | `o` | **Open** the photo/file of the selected message (`image_viewer` for images, `open_command` otherwise) |
 | `d` | Delete selected message (with confirmation prompt) |
 | `i` / `a` | Enter **INSERT** mode to type a message |
-| `e` | Open **`$EDITOR`** (Neovim) to write long/Markdown messages; sends on `:wq`, `:cq` aborts |
+| `e` | Compose in **`$EDITOR`** (`general.editor`); sends on `:wq`, `:cq` aborts |
 | `/` or `<Space>f` | Open **Fuzzy Finder** modal (Telescope style) |
 | `?` | Toggle Keybinding Help Cheat Sheet |
 | `q` / `<C-c>` | Quit client cleanly |
@@ -75,7 +96,7 @@ On the first run, the client will prompt for your phone number, the verification
 | :--- | :--- |
 | `<Enter>` | Send message and return to NORMAL mode |
 | `<Esc>` | Exit to NORMAL mode (cancels mounted reply and attachments) |
-| `<C-e>` | Pop open Neovim with current input; sends upon `:wq` |
+| `<C-e>` | Continue the current input in `$EDITOR`; sends upon `:wq` |
 | `<C-v>` | Paste from clipboard: images (screenshots) and files copied in a file manager become attachments sent on `<Enter>` (input text = caption); otherwise pastes text |
 | `<C-u>` | Clear current input buffer |
 | `<C-w>` | Delete word backwards |
@@ -91,7 +112,7 @@ On the first run, the client will prompt for your phone number, the verification
 
 ---
 
-## 🔔 Background Service & Notifications
+## Background Service & Notifications
 
 The TUI is a client of a small background service (`telegram-tui daemon`) that owns the
 Telegram (TDLib) connection. It is started automatically the first time you open the TUI and
@@ -118,7 +139,7 @@ Service log (when auto-started): `~/.local/state/telegram-tui/daemon.log`.
 
 ---
 
-## 🖥️ Command Line
+## Command Line
 
 ```fish
 telegram-tui [-c|--config PATH] [--chat ID] [--no-daemon] [--demo] [--single-column] [-h|--help] [-v|--version]
@@ -130,11 +151,11 @@ TDLib logs are written to `<session_path>/tdlib.log`.
 
 ---
 
-## ⚙️ niri Integration (`~/.config/niri/config.kdl`)
+## niri Integration (`~/.config/niri/config.kdl`)
 
 ```kdl
 binds {
-    Mod+T { spawn "alacritty" "--class" "telegram-tui" "-e" "telegram-tui"; }
+    Mod+T { spawn "kitty" "--class" "telegram-tui" "-e" "telegram-tui"; }
 }
 
 window-rule {
@@ -142,3 +163,38 @@ window-rule {
     default-column-width { proportion 0.45; }
 }
 ```
+
+Notifications that open a new window use `daemon.open_command` (by default
+`kitty --class telegram-tui -e {exe} --chat {chat_id}`), so the same window rule applies.
+
+---
+
+## Configuration
+
+All options with their defaults are documented in [`config.example.toml`](config.example.toml).
+
+| Path | Contents |
+| :--- | :--- |
+| `~/.config/telegram-tui/config.toml` | Configuration (`./config.toml` and `--config` take precedence) |
+| `~/.local/share/telegram-tui/tdlib/` | TDLib session database and downloaded files (`session_path`) |
+| `~/.local/state/telegram-tui/` | Saved UI state (`ui.json`) and the service log (`daemon.log`) |
+| `$XDG_RUNTIME_DIR/telegram-tui.sock` | Socket between the TUI and the background service |
+
+---
+
+## Development
+
+```fish
+cargo test                      # unit + end-to-end UI tests (mock backend, no account needed)
+cargo clippy --all-targets
+cargo fmt
+cargo run -- --demo             # try the UI with mock data
+cargo test live_dbus -- --ignored   # sends one real desktop notification
+```
+
+---
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.

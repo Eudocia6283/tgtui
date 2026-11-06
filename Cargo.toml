@@ -2,9 +2,13 @@
 name = "telegram-tui"
 version = "0.1.0"
 edition = "2021"
-authors = ["Wayland & TUI Enthusiast"]
+authors = ["Eudocia"]
 description = "A minimalist, vim-inspired Telegram TUI client tailored for Arch Linux, niri, and Wayland."
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Eudocia6283/tgtui"
+readme = "README.md"
+keywords = ["telegram", "tui", "tdlib", "ratatui", "wayland"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 ratatui = "0.29"
