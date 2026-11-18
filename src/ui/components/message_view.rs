@@ -138,7 +138,7 @@ fn bubble<'a>(
     if body.is_empty() && image.is_none() {
         body.push(String::new());
     }
-    let hint = (is_selected && msg.media.is_some()).then_some(" o: open ");
+    let hint = (is_selected && msg.has_openable()).then_some(" o: open ");
 
     let content_w = body
         .iter()

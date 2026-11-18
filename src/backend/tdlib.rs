@@ -1231,6 +1231,32 @@ fn error_text(err: &Value, legacy: &Value) -> String {
         .to_string()
 }
 
+fn content_urls(content: &Value) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut push = |u: &str| {
+        if !u.is_empty() && !urls.iter().any(|existing| existing == u) {
+            urls.push(u.to_string());
+        }
+    };
+    for key in ["text", "caption"] {
+        if let Some(entities) = content[key]["entities"].as_array() {
+            for entity in entities {
+                if entity["type"]["@type"] == "textEntityTypeTextUrl" {
+                    if let Some(u) = entity["type"]["url"].as_str() {
+                        push(u);
+                    }
+                }
+            }
+        }
+    }
+    for preview_key in ["link_preview", "web_page"] {
+        if let Some(u) = content[preview_key]["url"].as_str() {
+            push(u);
+        }
+    }
+    urls
+}
+
 fn parse_message(st: &State, m: &Value) -> Message {
     let chat_id = m["chat_id"].as_i64().unwrap_or(0);
     let id = m["id"].as_i64().unwrap_or(0);
@@ -1262,6 +1288,7 @@ fn parse_message(st: &State, m: &Value) -> Message {
         chat_id,
         sender_name: sender_name(st, m),
         text: content_text(&m["content"]),
+        urls: content_urls(&m["content"]),
         date,
         time_str: format_message_time(date),
         is_outgoing,
@@ -1344,5 +1371,23 @@ mod tests {
             "inline uses the largest <= 800px"
         );
         assert_eq!(content_text(&content), "[Photo] cat");
+    }
+
+    #[test]
+    fn text_url_entities_and_link_previews_are_extracted() {
+        let content = json!({
+            "@type": "messageText",
+            "text": {
+                "text": "Read the docs",
+                "entities": [
+                    { "type": { "@type": "textEntityTypeTextUrl", "url": "https://docs.rs" } }
+                ]
+            },
+            "link_preview": { "url": "https://rust-lang.org" }
+        });
+        assert_eq!(
+            content_urls(&content),
+            vec!["https://docs.rs", "https://rust-lang.org"]
+        );
     }
 }

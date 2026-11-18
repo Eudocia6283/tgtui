@@ -321,6 +321,7 @@ mod tests {
             chat_id: -1,
             sender_name: "test".into(),
             text: "Background service notification check (closes in 8s)".into(),
+            urls: Vec::new(),
             date: 0,
             time_str: String::new(),
             is_outgoing: false,

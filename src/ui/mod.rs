@@ -26,7 +26,7 @@ pub fn render(f: &mut Frame, app: &App) {
         // Single Column Focused Mode
         match app.active_pane {
             ActivePane::Chats => (Some(content_area), None),
-            ActivePane::Messages => (None, Some(content_area)),
+            ActivePane::Messages | ActivePane::Input => (None, Some(content_area)),
         }
     } else {
         // Dual Column Standard Mode
@@ -50,12 +50,7 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     if let Some(area) = messages_area {
-        render_messages_pane(
-            f,
-            area,
-            app,
-            is_compact || app.active_pane == ActivePane::Messages,
-        );
+        render_messages_pane(f, area, app);
     }
 
     let active_title = app.active_chat().map(|c| c.title.as_str());
@@ -100,15 +95,20 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 }
 
-fn render_messages_pane(f: &mut Frame, area: Rect, app: &App, focused: bool) {
+fn render_messages_pane(f: &mut Frame, area: Rect, app: &App) {
     let [messages_area, input_area] = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(components::input_box::height(
+            &app.input_buffer,
+            area.width,
             app.replying_to.is_some(),
             app.attachments.len(),
         )),
     ])
     .areas(area);
+
+    let messages_focused = app.mode != AppMode::Insert && app.active_pane == ActivePane::Messages;
+    let input_focused = app.mode == AppMode::Insert || app.active_pane == ActivePane::Input;
 
     components::message_view::render(
         f,
@@ -116,7 +116,7 @@ fn render_messages_pane(f: &mut Frame, area: Rect, app: &App, focused: bool) {
         app.active_chat(),
         &app.messages,
         app.selected_msg_idx,
-        focused,
+        messages_focused,
         &app.msg_scroll,
         &app.images,
         &app.theme,
@@ -126,9 +126,13 @@ fn render_messages_pane(f: &mut Frame, area: Rect, app: &App, focused: bool) {
         f,
         input_area,
         &app.input_buffer,
+        app.input_cursor,
         app.replying_to.as_deref(),
         &app.attachments,
         app.mode,
+        input_focused,
+        &app.input_width,
+        &app.input_scroll,
         &app.theme,
     );
 }

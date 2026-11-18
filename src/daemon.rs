@@ -584,6 +584,7 @@ mod tests {
             chat_id,
             sender_name: "Bob".into(),
             text: format!("m{id}"),
+            urls: Vec::new(),
             date,
             time_str: String::new(),
             is_outgoing: outgoing,

@@ -7,7 +7,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, Mou
 
 pub async fn handle_event(app: &mut App, event: AppEvent) -> Result<()> {
     match event {
-        AppEvent::Backend(evt) => handle_backend_event(app, evt).await?,
+        AppEvent::Backend(evt) => handle_backend_event(app, *evt).await?,
         AppEvent::Quit => app.should_quit = true,
         AppEvent::Input(Event::FocusGained) => app.set_focused(true).await,
         AppEvent::Input(Event::FocusLost) => app.set_focused(false).await,
@@ -17,7 +17,7 @@ pub async fn handle_event(app: &mut App, event: AppEvent) -> Result<()> {
             handle_key_event(app, key).await?;
         }
         AppEvent::Input(Event::Paste(text)) => match app.mode {
-            AppMode::Insert => app.input_buffer.push_str(&text),
+            AppMode::Insert => app.insert_str(&text),
             AppMode::FuzzyFind => {
                 app.search_query.push_str(text.lines().next().unwrap_or(""));
                 app.fuzzy_selected_idx = 0;
@@ -112,7 +112,14 @@ async fn move_down(app: &mut App) -> Result<()> {
                 app.switch_chat(idx).await?;
             }
         }
-        ActivePane::Messages => app.move_msg_selection(1),
+        ActivePane::Messages => {
+            if app.selected_msg_idx + 1 < app.messages.len() {
+                app.move_msg_selection(1);
+            } else {
+                app.active_pane = ActivePane::Input;
+            }
+        }
+        ActivePane::Input => {}
     }
     Ok(())
 }
@@ -131,6 +138,9 @@ async fn move_up(app: &mut App) -> Result<()> {
                 app.move_msg_selection(-1);
             }
         }
+        ActivePane::Input => {
+            app.focus_messages().await;
+        }
     }
     Ok(())
 }
@@ -147,6 +157,7 @@ async fn handle_normal_keys(app: &mut App, key: KeyEvent) -> Result<()> {
     if let Some(first) = app.pending_key.take() {
         match (first, key.code) {
             ('g', KeyCode::Char('g')) => {
+                app.active_pane = ActivePane::Messages;
                 app.selected_msg_idx = 0;
                 app.load_older().await?;
             }
@@ -159,13 +170,55 @@ async fn handle_normal_keys(app: &mut App, key: KeyEvent) -> Result<()> {
     if !plain(&key) {
         return Ok(());
     }
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('H') => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_left();
+            }
+        }
+        KeyCode::Char('J') => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_down();
+            }
+        }
+        KeyCode::Char('K') => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_up();
+            }
+        }
+        KeyCode::Char('L') => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_right();
+            }
+        }
+        KeyCode::Char('h') | KeyCode::Left if shift => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_left();
+            }
+        }
+        KeyCode::Char('j') | KeyCode::Down if shift => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_down();
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up if shift => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_up();
+            }
+        }
+        KeyCode::Char('l') | KeyCode::Right if shift => {
+            if app.active_pane == ActivePane::Input {
+                app.move_cursor_right();
+            }
+        }
         KeyCode::Char('j') | KeyCode::Down => move_down(app).await?,
         KeyCode::Char('k') | KeyCode::Up => move_up(app).await?,
         KeyCode::Char('h') | KeyCode::Left => app.active_pane = ActivePane::Chats,
         KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => app.focus_messages().await,
         KeyCode::Char('G') | KeyCode::End => {
+            app.active_pane = ActivePane::Messages;
             app.selected_msg_idx = app.messages.len().saturating_sub(1);
         }
         KeyCode::Char('g') => app.pending_key = Some('g'),
@@ -179,7 +232,8 @@ async fn handle_normal_keys(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.mode = AppMode::ConfirmDelete;
             }
         }
-        KeyCode::Char('i') | KeyCode::Char('a') => app.enter_insert(),
+        KeyCode::Char('i') => app.enter_insert(),
+        KeyCode::Char('a') => app.enter_append(),
         KeyCode::Char('e') => app.editor_requested = true,
         KeyCode::Char('/') => open_fuzzy(app),
         KeyCode::Char('?') => app.mode = AppMode::Help,
@@ -192,7 +246,7 @@ async fn handle_insert_keys(app: &mut App, key: KeyEvent) -> Result<()> {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('e') => app.editor_requested = true,
-            KeyCode::Char('u') => app.input_buffer.clear(),
+            KeyCode::Char('u') => app.clear_input(),
             KeyCode::Char('w') | KeyCode::Backspace => app.delete_word_backwards(),
             KeyCode::Char('v') => app.paste_from_clipboard(),
             KeyCode::Char('c') => app.cancel_insert(),
@@ -204,10 +258,13 @@ async fn handle_insert_keys(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => app.cancel_insert(),
         KeyCode::Enter => app.send_current_message().await?,
         KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => app.delete_word_backwards(),
-        KeyCode::Backspace => {
-            app.input_buffer.pop();
-        }
-        KeyCode::Char(c) if plain(&key) => app.input_buffer.push(c),
+        KeyCode::Backspace => app.delete_char_before_cursor(),
+        KeyCode::Delete => app.delete_char_at_cursor(),
+        KeyCode::Left => app.move_cursor_left(),
+        KeyCode::Right => app.move_cursor_right(),
+        KeyCode::Up => app.move_cursor_up(),
+        KeyCode::Down => app.move_cursor_down(),
+        KeyCode::Char(c) if plain(&key) => app.insert_char(c),
         _ => {}
     }
     Ok(())

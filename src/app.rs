@@ -27,6 +27,7 @@ enum Pasted {
 pub enum ActivePane {
     Chats,
     Messages,
+    Input,
 }
 
 pub struct App {
@@ -39,6 +40,12 @@ pub struct App {
     pub replying_to: Option<String>,
     pub reply_target_id: Option<i64>,
     pub input_buffer: String,
+    /// Cursor position (byte offset) inside `input_buffer`.
+    pub input_cursor: usize,
+    /// Inner text width of the input box from the last render, used for up/down cursor movement.
+    pub input_width: Cell<usize>,
+    /// Vertical scroll offset of wrapped input lines.
+    pub input_scroll: Cell<usize>,
     /// Files pasted with <C-v>, sent together with the input on <Enter>.
     pub attachments: Vec<Attachment>,
     pub search_query: String,
@@ -88,6 +95,9 @@ impl App {
             replying_to: None,
             reply_target_id: None,
             input_buffer: String::new(),
+            input_cursor: 0,
+            input_width: Cell::new(60),
+            input_scroll: Cell::new(0),
             attachments: Vec::new(),
             search_query: String::new(),
             fuzzy_selected_idx: 0,
@@ -199,6 +209,7 @@ impl App {
             self.active_pane = pane;
         }
         self.input_buffer = saved.input;
+        self.input_cursor = self.input_buffer.len();
         if let Some((id, preview)) = saved.reply_to {
             self.reply_target_id = Some(id);
             self.replying_to = Some(preview);
@@ -296,7 +307,9 @@ impl App {
 
     /// Mark the open chat as read if the user is actually looking at it.
     pub async fn mark_active_read(&mut self) {
-        if !self.config.general.auto_mark_read || self.active_pane != ActivePane::Messages {
+        if !self.config.general.auto_mark_read
+            || !matches!(self.active_pane, ActivePane::Messages | ActivePane::Input)
+        {
             return;
         }
         let Some(last_id) = self.messages.last().map(|m| m.id) else {
@@ -498,6 +511,7 @@ impl App {
         }
 
         self.input_buffer.clear();
+        self.input_cursor = 0;
         self.replying_to = None;
         self.reply_target_id = None;
         self.mode = AppMode::Normal;
@@ -505,8 +519,20 @@ impl App {
     }
 
     pub fn enter_insert(&mut self) {
+        self.clamp_cursor();
         // In single-column mode the input box lives in the messages pane.
-        self.active_pane = ActivePane::Messages;
+        self.active_pane = ActivePane::Input;
+        self.mode = AppMode::Insert;
+    }
+
+    pub fn enter_append(&mut self) {
+        self.clamp_cursor();
+        if self.active_pane == ActivePane::Input {
+            self.move_cursor_right();
+        } else {
+            self.input_cursor = self.input_buffer.len();
+        }
+        self.active_pane = ActivePane::Input;
         self.mode = AppMode::Insert;
     }
 
@@ -524,9 +550,11 @@ impl App {
         }
     }
 
-    /// Leave INSERT mode, dropping any mounted reply and attachments.
+    /// Leave INSERT mode, dropping any mounted reply and attachments, and keep
+    /// focus on the input bar so cursor adjustments can continue immediately.
     pub fn cancel_insert(&mut self) {
         self.mode = AppMode::Normal;
+        self.active_pane = ActivePane::Input;
         self.replying_to = None;
         self.reply_target_id = None;
         self.attachments.clear();
@@ -606,7 +634,7 @@ impl App {
     /// attachments, anything else is inserted as text.
     pub fn paste_from_clipboard(&mut self) {
         match self.read_clipboard() {
-            Ok(Pasted::Text(text)) => self.input_buffer.push_str(&text),
+            Ok(Pasted::Text(text)) => self.insert_str(&text),
             Ok(Pasted::Files(files)) => {
                 let n = files.len();
                 self.attachments.extend(files);
@@ -668,55 +696,148 @@ impl App {
         Ok(Pasted::Text(text.strip_suffix('\n').unwrap_or(&text).to_string()))
     }
 
-    /// Download (if needed) and open the selected message's media in the
-    /// background; the result is reported through the status bar.
+    /// Download (if needed) and open the selected message's media or web link in
+    /// the background; the result is reported through the status bar.
     pub fn open_selected_media(&mut self) {
-        let Some(media) = self
-            .messages
-            .get(self.selected_msg_idx)
-            .and_then(|m| m.media.clone())
-        else {
-            self.set_status("Selected message has no media");
+        let Some(msg) = self.messages.get(self.selected_msg_idx) else {
+            self.set_status("Selected message has no media or links");
             return;
         };
-        let opener = self.config.wayland.open_command.clone();
-        let cmd = match media.kind {
-            MediaKind::Image => self.config.wayland.image_viewer.clone(),
-            MediaKind::File => opener.clone(),
-        };
-        let backend = self.backend.clone();
-        let tx = self.events_tx.clone();
-        self.set_status("Downloading media…");
-        tokio::spawn(async move {
-            let msg = match backend.download_media(media.file_id).await {
-                Ok(path) => {
-                    let arg = [path.to_string_lossy().into_owned()];
-                    // Fall back to the generic opener if the image viewer isn't installed.
-                    let used = match spawn_command(&cmd, &arg, None) {
-                        Ok(()) => Ok(cmd),
-                        Err(_) if cmd != opener => spawn_command(&opener, &arg, None).map(|_| opener),
-                        Err(e) => Err(e),
-                    };
-                    match used {
-                        Ok(used) => format!("Opened {} with {used}", path.display()),
-                        Err(e) => format!("Failed to open {}: {e}", path.display()),
-                    }
-                }
-                Err(e) => format!("Media download failed: {e}"),
+        if let Some(media) = msg.media.clone() {
+            let opener = self.config.wayland.open_command.clone();
+            let cmd = match media.kind {
+                MediaKind::Image => self.config.wayland.image_viewer.clone(),
+                MediaKind::File => opener.clone(),
             };
-            let _ = tx.send(BackendEvent::Status(msg));
-        });
+            let backend = self.backend.clone();
+            let tx = self.events_tx.clone();
+            self.set_status("Downloading media…");
+            tokio::spawn(async move {
+                let msg = match backend.download_media(media.file_id).await {
+                    Ok(path) => {
+                        let arg = [path.to_string_lossy().into_owned()];
+                        // Fall back to the generic opener if the image viewer isn't installed.
+                        let used = match spawn_command(&cmd, &arg, None) {
+                            Ok(()) => Ok(cmd),
+                            Err(_) if cmd != opener => spawn_command(&opener, &arg, None).map(|_| opener),
+                            Err(e) => Err(e),
+                        };
+                        match used {
+                            Ok(used) => format!("Opened {} with {used}", path.display()),
+                            Err(e) => format!("Failed to open {}: {e}", path.display()),
+                        }
+                    }
+                    Err(e) => format!("Media download failed: {e}"),
+                };
+                let _ = tx.send(BackendEvent::Status(msg));
+            });
+            return;
+        }
+        let links = msg.links();
+        if let Some(url) = links.into_iter().next() {
+            let opener = self.config.wayland.open_command.clone();
+            match spawn_command(&opener, std::slice::from_ref(&url), None) {
+                Ok(()) => self.set_status(format!("Opened {url} with {opener}")),
+                Err(e) => self.set_status(format!("Failed to open {url}: {e}")),
+            }
+            return;
+        }
+        self.set_status("Selected message has no media or links");
+    }
+
+    pub fn clamp_cursor(&mut self) {
+        self.input_cursor = self.input_cursor.min(self.input_buffer.len());
+        while self.input_cursor > 0 && !self.input_buffer.is_char_boundary(self.input_cursor) {
+            self.input_cursor -= 1;
+        }
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        self.clamp_cursor();
+        self.input_buffer.insert(self.input_cursor, c);
+        self.input_cursor += c.len_utf8();
+    }
+
+    pub fn insert_str(&mut self, s: &str) {
+        self.clamp_cursor();
+        self.input_buffer.insert_str(self.input_cursor, s);
+        self.input_cursor += s.len();
+    }
+
+    pub fn delete_char_before_cursor(&mut self) {
+        self.clamp_cursor();
+        if let Some((idx, _)) = self.input_buffer[..self.input_cursor].char_indices().next_back() {
+            self.input_buffer.remove(idx);
+            self.input_cursor = idx;
+        }
+    }
+
+    pub fn delete_char_at_cursor(&mut self) {
+        self.clamp_cursor();
+        if self.input_cursor < self.input_buffer.len() {
+            self.input_buffer.remove(self.input_cursor);
+        }
+    }
+
+    pub fn clear_input(&mut self) {
+        self.input_buffer.clear();
+        self.input_cursor = 0;
     }
 
     pub fn delete_word_backwards(&mut self) {
-        let trimmed = self.input_buffer.trim_end().len();
-        self.input_buffer.truncate(trimmed);
-        let cut = self
-            .input_buffer
-            .rfind(char::is_whitespace)
-            .map(|i| i + 1)
+        self.clamp_cursor();
+        let before = &self.input_buffer[..self.input_cursor];
+        let trimmed = before.trim_end().len();
+        let cut = before[..trimmed]
+            .char_indices()
+            .rev()
+            .find(|(_, c)| c.is_whitespace())
+            .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(0);
-        self.input_buffer.truncate(cut);
+        self.input_buffer.drain(cut..self.input_cursor);
+        self.input_cursor = cut;
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        self.clamp_cursor();
+        if let Some((idx, _)) = self.input_buffer[..self.input_cursor].char_indices().next_back() {
+            self.input_cursor = idx;
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        self.clamp_cursor();
+        if let Some(c) = self.input_buffer[self.input_cursor..].chars().next() {
+            self.input_cursor += c.len_utf8();
+        }
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        self.clamp_cursor();
+        let width = self.input_width.get().max(1);
+        let lines = crate::ui::utils::layout_input_lines(&self.input_buffer, width);
+        let (row, col) = crate::ui::utils::cursor_line_col(&self.input_buffer, &lines, self.input_cursor);
+        if row > 0 {
+            let prev = lines[row - 1];
+            let wrapped = prev.end == lines[row].start;
+            self.input_cursor = crate::ui::utils::line_col_to_byte(&self.input_buffer, prev, col, wrapped);
+        } else {
+            self.input_cursor = 0;
+        }
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        self.clamp_cursor();
+        let width = self.input_width.get().max(1);
+        let lines = crate::ui::utils::layout_input_lines(&self.input_buffer, width);
+        let (row, col) = crate::ui::utils::cursor_line_col(&self.input_buffer, &lines, self.input_cursor);
+        if row + 1 < lines.len() {
+            let next = lines[row + 1];
+            let wrapped = lines.get(row + 2).is_some_and(|after| next.end == after.start);
+            self.input_cursor = crate::ui::utils::line_col_to_byte(&self.input_buffer, next, col, wrapped);
+        } else {
+            self.input_cursor = self.input_buffer.len();
+        }
     }
 
     fn notify(&self, msg: &Message) {

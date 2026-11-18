@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 
 pub enum AppEvent {
     Input(CrosstermEvent),
-    Backend(BackendEvent),
+    Backend(Box<BackendEvent>),
     /// SIGHUP / SIGTERM (e.g. the terminal window was closed).
     Quit,
 }
@@ -28,7 +28,7 @@ impl EventHandler {
         let mut b_rx = backend_rx;
         tokio::spawn(async move {
             while let Some(evt) = b_rx.recv().await {
-                if tx_backend.send(AppEvent::Backend(evt)).is_err() {
+                if tx_backend.send(AppEvent::Backend(Box::new(evt))).is_err() {
                     break;
                 }
             }

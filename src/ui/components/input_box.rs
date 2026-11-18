@@ -1,7 +1,7 @@
 use crate::backend::model::{Attachment, MediaKind};
 use crate::mode::AppMode;
 use crate::ui::theme::Theme;
-use crate::ui::utils::{tail_fit, truncate_str};
+use crate::ui::utils::{cursor_line_col, layout_input_lines, truncate_str};
 use ratatui::{
     layout::{Position, Rect},
     style::Modifier,
@@ -9,31 +9,51 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use std::cell::Cell;
 use unicode_width::UnicodeWidthStr;
 
+const MAX_INPUT_LINES: usize = 5;
+
 /// Height of the input box including borders.
-pub fn height(replying: bool, attachments: usize) -> u16 {
-    3 + replying as u16 + (attachments > 0) as u16
+pub fn height(input_buffer: &str, area_width: u16, replying: bool, attachments: usize) -> u16 {
+    let text_width = area_width.saturating_sub(4).max(1) as usize;
+    let lines = if input_buffer.is_empty() {
+        1
+    } else {
+        layout_input_lines(input_buffer, text_width)
+            .len()
+            .clamp(1, MAX_INPUT_LINES)
+    };
+    2 + lines as u16 + replying as u16 + (attachments > 0) as u16
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     input_buffer: &str,
+    input_cursor: usize,
     replying_to: Option<&str>,
     attachments: &[Attachment],
     mode: AppMode,
+    is_focused: bool,
+    input_width: &Cell<usize>,
+    input_scroll: &Cell<usize>,
     theme: &Theme,
 ) {
     let is_insert = mode == AppMode::Insert;
     let border_style = if is_insert {
         theme.success
+    } else if is_focused {
+        theme.border_focus
     } else {
         theme.border_normal
     };
 
     let title = if is_insert {
         " Input [INSERT - Markdown Enabled] "
+    } else if is_focused {
+        " Input [H/J/K/L: cursor | i/a: edit] "
     } else {
         " Input "
     };
@@ -45,6 +65,8 @@ pub fn render(
         .border_style(border_style);
     let inner = block.inner(area);
     let width = inner.width as usize;
+    let text_width = width.saturating_sub(2).max(1);
+    input_width.set(text_width);
 
     let mut lines = Vec::new();
 
@@ -89,24 +111,41 @@ pub fn render(
         ]));
     }
 
-    if is_insert || !input_buffer.is_empty() {
-        // Newlines (from paste / editor) are shown as ⏎ on the single input line.
-        let flat = input_buffer.replace('\n', "⏎");
-        let shown = tail_fit(&flat, width.saturating_sub(3));
-        let cursor_x = inner.x + 2 + shown.width() as u16;
-        lines.push(Line::from(vec![
-            Span::styled(
-                "❯ ",
-                if is_insert {
-                    theme.success.add_modifier(Modifier::BOLD)
-                } else {
-                    theme.text_muted
-                },
-            ),
-            Span::styled(shown.to_string(), theme.text_bold),
-        ]));
-        if is_insert {
-            let cursor_y = inner.y + lines.len() as u16 - 1;
+    if is_insert || is_focused || !input_buffer.is_empty() {
+        let visual_lines = layout_input_lines(input_buffer, text_width);
+        let (cursor_row, cursor_col) = cursor_line_col(input_buffer, &visual_lines, input_cursor);
+        let avail_rows = (inner.height as usize).saturating_sub(lines.len()).max(1);
+
+        let max_scroll = visual_lines.len().saturating_sub(avail_rows);
+        let mut scroll = input_scroll.get().min(max_scroll);
+        if cursor_row < scroll {
+            scroll = cursor_row;
+        } else if cursor_row >= scroll + avail_rows {
+            scroll = cursor_row + 1 - avail_rows;
+        }
+        input_scroll.set(scroll);
+
+        let input_start_row = lines.len();
+        let prompt_style = if is_insert {
+            theme.success.add_modifier(Modifier::BOLD)
+        } else if is_focused {
+            theme.accent.add_modifier(Modifier::BOLD)
+        } else {
+            theme.text_muted
+        };
+        for (vis_idx, vline) in visual_lines.iter().enumerate().skip(scroll).take(avail_rows) {
+            let prefix = if vis_idx == 0 { "❯ " } else { "  " };
+            let slice = &input_buffer[vline.start..vline.end];
+            lines.push(Line::from(vec![
+                Span::styled(prefix, prompt_style),
+                Span::styled(slice.to_string(), theme.text_bold),
+            ]));
+        }
+
+        if (is_insert || (mode == AppMode::Normal && is_focused)) && inner.width > 0 && inner.height > 0 {
+            let visible_row = cursor_row.saturating_sub(scroll);
+            let cursor_y = inner.y + input_start_row as u16 + visible_row as u16;
+            let cursor_x = inner.x + 2 + cursor_col as u16;
             if cursor_y < inner.bottom() {
                 f.set_cursor_position(Position::new(
                     cursor_x.min(inner.right().saturating_sub(1)),

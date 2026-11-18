@@ -414,6 +414,7 @@ async fn run_editor(terminal: &mut Term, events: &mut EventHandler, app: &mut Ap
     match edited {
         Ok(Some(text)) => {
             app.input_buffer = text;
+            app.input_cursor = app.input_buffer.len();
             app.send_current_message().await?;
         }
         Ok(None) => app.set_status("Editor closed without sending"),

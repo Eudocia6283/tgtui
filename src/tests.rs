@@ -38,7 +38,7 @@ async fn chars(app: &mut App, s: &str) {
 /// Feed queued backend events into the app, like the main loop does.
 async fn pump(app: &mut App, rx: &mut mpsc::UnboundedReceiver<BackendEvent>) {
     while let Ok(evt) = rx.try_recv() {
-        handle_event(app, AppEvent::Backend(evt)).await.unwrap();
+        handle_event(app, AppEvent::Backend(Box::new(evt))).await.unwrap();
     }
 }
 
@@ -210,7 +210,9 @@ async fn open_media_reports_status() {
             .unwrap()
             .unwrap();
         let is_status = matches!(evt, BackendEvent::Status(_));
-        handle_event(&mut app, AppEvent::Backend(evt)).await.unwrap();
+        handle_event(&mut app, AppEvent::Backend(Box::new(evt)))
+            .await
+            .unwrap();
         if is_status {
             break;
         }
@@ -252,7 +254,9 @@ async fn inline_image_renders_with_kitty_placeholders() {
             .unwrap()
             .unwrap();
         let done = matches!(evt, BackendEvent::ImageDecoded { .. });
-        handle_event(&mut app, AppEvent::Backend(evt)).await.unwrap();
+        handle_event(&mut app, AppEvent::Backend(Box::new(evt)))
+            .await
+            .unwrap();
         if done {
             break;
         }
@@ -359,10 +363,10 @@ async fn ticks_switch_from_sent_to_read() {
 
     handle_event(
         &mut app,
-        AppEvent::Backend(BackendEvent::OutboxRead {
+        AppEvent::Backend(Box::new(BackendEvent::OutboxRead {
             chat_id: last.chat_id,
             message_id: last.id,
-        }),
+        })),
     )
     .await
     .unwrap();
@@ -412,9 +416,12 @@ async fn restore_waits_for_late_chat_unless_user_moves_first() {
     .unwrap();
     assert_ne!(app.active_chat_id(), Some(999));
     let c = late_chat(&app);
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c)))
-        .await
-        .unwrap();
+    handle_event(
+        &mut app,
+        AppEvent::Backend(Box::new(BackendEvent::ChatUpdated(c))),
+    )
+    .await
+    .unwrap();
     assert_eq!(app.active_chat_id(), Some(999));
 
     // ...but once the user pressed a key, we don't yank them away.
@@ -428,9 +435,12 @@ async fn restore_waits_for_late_chat_unless_user_moves_first() {
     chars(&mut app, "j").await;
     let before = app.active_chat_id();
     let c = late_chat(&app);
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::ChatUpdated(c)))
-        .await
-        .unwrap();
+    handle_event(
+        &mut app,
+        AppEvent::Backend(Box::new(BackendEvent::ChatUpdated(c))),
+    )
+    .await
+    .unwrap();
     assert_eq!(app.active_chat_id(), before);
 }
 
@@ -438,10 +448,159 @@ async fn restore_waits_for_late_chat_unless_user_moves_first() {
 async fn notification_open_jumps_to_chat() {
     let (mut app, _rx) = setup().await;
     chars(&mut app, "i").await;
-    handle_event(&mut app, AppEvent::Backend(BackendEvent::OpenChat { chat_id: 4 }))
-        .await
-        .unwrap();
+    handle_event(
+        &mut app,
+        AppEvent::Backend(Box::new(BackendEvent::OpenChat { chat_id: 4 })),
+    )
+    .await
+    .unwrap();
     assert_eq!(app.active_chat_id(), Some(4));
     assert_eq!(app.mode, AppMode::Normal);
     assert_eq!(app.active_pane, ActivePane::Messages);
+}
+
+#[tokio::test]
+async fn open_web_link_in_selected_message() {
+    let (mut app, _rx) = setup().await;
+    app.switch_chat(1).await.unwrap();
+
+    let dir = std::env::temp_dir().join(format!("tgtui-open-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("fake-open.sh");
+    let log = dir.join("opened.txt");
+    std::fs::write(
+        &bin,
+        format!("#!/bin/sh\nprintf '%s' \"$1\" > {}\n", log.display()),
+    )
+    .unwrap();
+    app.config.wayland.open_command = format!("sh {}", bin.display());
+
+    let mut m = app.messages[0].clone();
+    m.id = 9001;
+    m.text = "Check out https://example.com/docs?q=1.".into();
+    m.media = None;
+    app.add_message(m);
+
+    let s = screen(&app, 110, 30);
+    assert!(
+        s.contains("o: open"),
+        "bubble should show open hint for URL:\n{s}"
+    );
+
+    chars(&mut app, "o").await;
+    assert!(
+        app.status_msg
+            .as_deref()
+            .is_some_and(|st| st.contains("Opened https://example.com/docs?q=1")),
+        "{:?}",
+        app.status_msg
+    );
+    for _ in 0..50 {
+        if std::fs::read_to_string(&log).is_ok_and(|c| c == "https://example.com/docs?q=1") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "https://example.com/docs?q=1"
+    );
+
+    // Also supports entity-only URLs (`textEntityTypeTextUrl`) not visible in text.
+    let mut entity_msg = app.messages[0].clone();
+    entity_msg.id = 9002;
+    entity_msg.text = "Click here".into();
+    entity_msg.urls = vec!["https://rust-lang.org".into()];
+    entity_msg.media = None;
+    app.add_message(entity_msg);
+    assert!(screen(&app, 110, 30).contains("o: open"));
+    chars(&mut app, "o").await;
+    assert!(
+        app.status_msg
+            .as_deref()
+            .is_some_and(|st| st.contains("Opened https://rust-lang.org")),
+        "{:?}",
+        app.status_msg
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn jk_focuses_input_bar_and_esc_defaults_to_input_bar() {
+    let (mut app, _rx) = setup().await;
+    app.switch_chat(1).await.unwrap();
+    assert_eq!(app.active_pane, ActivePane::Messages);
+    assert_eq!(app.selected_msg_idx, app.messages.len() - 1);
+
+    // `j` at the bottom message focuses the input bar; `k` returns to messages.
+    chars(&mut app, "j").await;
+    assert_eq!(app.active_pane, ActivePane::Input);
+    assert!(screen(&app, 60, 20).contains("Input"));
+
+    chars(&mut app, "k").await;
+    assert_eq!(app.active_pane, ActivePane::Messages);
+    assert_eq!(app.selected_msg_idx, app.messages.len() - 1);
+
+    // Pressing Esc in Insert mode exits to Normal mode focused on the input bar.
+    chars(&mut app, "ihello").await;
+    assert_eq!(app.mode, AppMode::Insert);
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE).await;
+    assert_eq!(app.mode, AppMode::Normal);
+    assert_eq!(app.active_pane, ActivePane::Input);
+}
+
+#[tokio::test]
+async fn shift_hjkl_moves_input_cursor_when_focused() {
+    let (mut app, _rx) = setup().await;
+    app.switch_chat(1).await.unwrap();
+
+    // Render once so `input_width` is populated, then enter a multi-line draft.
+    screen(&app, 100, 30);
+    chars(&mut app, "i").await;
+    handle_event(
+        &mut app,
+        AppEvent::Input(Event::Paste("alpha beta\ngamma delta".into())),
+    )
+    .await
+    .unwrap();
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE).await;
+    assert_eq!(app.active_pane, ActivePane::Input);
+    assert_eq!(app.input_cursor, app.input_buffer.len());
+
+    // Shift+H moves left by one character; Shift+K moves up one line.
+    key(&mut app, KeyCode::Char('H'), KeyModifiers::SHIFT).await;
+    assert_eq!(&app.input_buffer[..app.input_cursor], "alpha beta\ngamma delt");
+    key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT).await;
+    // Line 0 ("alpha beta") has length 10, cursor moves to column 10 (end of line 0, before '\n')
+    // Wait: at "gamma delt" (len 10) or "gamma delt" col 10 -> "alpha beta" col 10 -> byte 10.
+    assert_eq!(&app.input_buffer[..app.input_cursor], "alpha beta");
+
+    // Shift+H / Shift+L work via Left/Right + SHIFT as well.
+    key(&mut app, KeyCode::Left, KeyModifiers::SHIFT).await;
+    assert_eq!(&app.input_buffer[..app.input_cursor], "alpha bet");
+    key(&mut app, KeyCode::Char('J'), KeyModifiers::SHIFT).await;
+    assert_eq!(&app.input_buffer[..app.input_cursor], "alpha beta\ngamma del");
+    key(&mut app, KeyCode::Char('L'), KeyModifiers::SHIFT).await;
+    assert_eq!(&app.input_buffer[..app.input_cursor], "alpha beta\ngamma delt");
+
+    // Re-enter insert mode with `i` and insert at cursor position.
+    chars(&mut app, "i!").await;
+    assert_eq!(app.input_buffer, "alpha beta\ngamma delt!a");
+
+    // Esc back to Input focus, move up with `Shift+K`, and test `a` (append after char).
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE).await;
+    key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT).await;
+    key(&mut app, KeyCode::Char('H'), KeyModifiers::SHIFT).await;
+    // Cursor is before 'a' in "alpha beta" (byte 9)
+    assert_eq!(&app.input_buffer[..app.input_cursor], "alpha bet");
+    chars(&mut app, "aX").await;
+    assert_eq!(app.input_buffer, "alpha betaX\ngamma delt!a");
+
+    // Cursor position is also set in ratatui when Input is focused in Normal mode.
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE).await;
+    let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    let frame_cursor = term.draw(|f| crate::ui::render(f, &app)).unwrap();
+    let _ = frame_cursor;
+    assert!(term.get_cursor_position().unwrap().y > 20);
 }

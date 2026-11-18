@@ -76,15 +76,16 @@ right away. Try the UI without an account with `telegram-tui --demo`.
 
 | Key | Action |
 | :--- | :--- |
-| `j` / `k` | Scroll down / up messages (or move through chat list); `k` at the top loads older history |
+| `j` / `k` | Scroll down / up messages (or move through chat list); `j` at the bottom focuses the **Input** bar, `k` returns to messages; `k` at the top loads older history |
+| `H` / `J` / `K` / `L` | Move the input cursor left / down / up / right when the **Input** bar is focused |
 | `h` / `l` / `<Enter>` | Switch pane focus between **Chats** and **Messages** (focusing messages marks the chat read) |
 | `G` / `gg` | Jump to newest / oldest message in history |
 | `r` | **Reply** to highlighted message (mounts quote card and enters INSERT) |
 | `y` | **Yank** to the Wayland clipboard via `wl-copy`: images as PNG data, other files as `text/uri-list` (pastes into file managers / back into a chat), text otherwise |
 | `Y` | Yank only the text (for media messages: the caption) |
-| `o` | **Open** the photo/file of the selected message (`image_viewer` for images, `open_command` otherwise) |
+| `o` | **Open** the photo/file/web link of the selected message (`image_viewer` for images, `open_command` for other media and URLs) |
 | `d` | Delete selected message (with confirmation prompt) |
-| `i` / `a` | Enter **INSERT** mode to type a message |
+| `i` / `a` | Enter **INSERT** mode to type a message (at / after the input cursor) |
 | `e` | Compose in **`$EDITOR`** (`general.editor`); sends on `:wq`, `:cq` aborts |
 | `/` or `<Space>f` | Open **Fuzzy Finder** modal (Telescope style) |
 | `?` | Toggle Keybinding Help Cheat Sheet |
@@ -95,7 +96,7 @@ right away. Try the UI without an account with `telegram-tui --demo`.
 | Key | Action |
 | :--- | :--- |
 | `<Enter>` | Send message and return to NORMAL mode |
-| `<Esc>` | Exit to NORMAL mode (cancels mounted reply and attachments) |
+| `<Esc>` | Exit to NORMAL mode focused on the **Input** bar (cancels mounted reply and attachments) |
 | `<C-e>` | Continue the current input in `$EDITOR`; sends upon `:wq` |
 | `<C-v>` | Paste from clipboard: images (screenshots) and files copied in a file manager become attachments sent on `<Enter>` (input text = caption); otherwise pastes text |
 | `<C-u>` | Clear current input buffer |

@@ -77,6 +77,9 @@ pub struct Message {
     pub chat_id: i64,
     pub sender_name: String,
     pub text: String,
+    /// Additional URLs attached via message entities (e.g. text links) or previews.
+    #[serde(default)]
+    pub urls: Vec<String>,
     /// Unix timestamp (seconds)
     pub date: i64,
     pub time_str: String,
@@ -85,6 +88,160 @@ pub struct Message {
     pub reply_to: Option<ReplyInfo>,
     pub media: Option<Media>,
     pub send_state: SendState,
+}
+
+impl Message {
+    /// All web links in this message (from text and rich-text entities), deduplicated.
+    pub fn links(&self) -> Vec<String> {
+        let mut out = extract_urls(&self.text);
+        for url in &self.urls {
+            if !url.is_empty() && !out.contains(url) {
+                out.push(url.clone());
+            }
+        }
+        out
+    }
+
+    /// Whether pressing `o` can open media or a web link for this message.
+    pub fn has_openable(&self) -> bool {
+        self.media.is_some() || !self.links().is_empty()
+    }
+}
+
+/// Extract HTTP(S) and `www.` web links from plain message text.
+pub fn extract_urls(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let is_scheme = rest.starts_with("https://") || rest.starts_with("http://");
+        let is_www = !is_scheme
+            && rest.starts_with("www.")
+            && text[..i].chars().next_back().is_none_or(|c| {
+                c.is_whitespace()
+                    || matches!(c, '(' | '[' | '{' | '<' | '"' | '\'' | '（' | '【' | '《' | '：')
+            });
+
+        if !is_scheme && !is_www {
+            let Some(ch) = rest.chars().next() else { break };
+            i += ch.len_utf8();
+            continue;
+        }
+
+        let end = rest
+            .char_indices()
+            .find(|&(_, c)| {
+                c.is_whitespace()
+                    || c.is_control()
+                    || matches!(
+                        c,
+                        '<' | '>'
+                            | '"'
+                            | '\''
+                            | '`'
+                            | '{'
+                            | '}'
+                            | '|'
+                            | '\\'
+                            | '^'
+                            | '，'
+                            | '。'
+                            | '；'
+                            | '：'
+                            | '！'
+                            | '？'
+                            | '、'
+                            | '（'
+                            | '）'
+                            | '【'
+                            | '】'
+                            | '《'
+                            | '》'
+                            | '「'
+                            | '」'
+                            | '『'
+                            | '』'
+                            | '“'
+                            | '”'
+                            | '‘'
+                            | '’'
+                    )
+            })
+            .map(|(idx, _)| idx)
+            .unwrap_or(rest.len());
+        let mut raw = &rest[..end];
+
+        loop {
+            let trimmed = raw.trim_end_matches(|c: char| {
+                matches!(
+                    c,
+                    '.' | ','
+                        | ';'
+                        | ':'
+                        | '!'
+                        | '?'
+                        | '}'
+                        | '。'
+                        | '，'
+                        | '；'
+                        | '：'
+                        | '！'
+                        | '？'
+                        | '）'
+                        | '】'
+                        | '》'
+                )
+            });
+            let after_paren = if let Some(stripped) = trimmed.strip_suffix(')') {
+                let open = trimmed.matches('(').count();
+                let close = trimmed.matches(')').count();
+                if close > open {
+                    stripped
+                } else {
+                    trimmed
+                }
+            } else {
+                trimmed
+            };
+            let after_bracket = if let Some(stripped) = after_paren.strip_suffix(']') {
+                let open = after_paren.matches('[').count();
+                let close = after_paren.matches(']').count();
+                if close > open {
+                    stripped
+                } else {
+                    after_paren
+                }
+            } else {
+                after_paren
+            };
+            if after_bracket.len() == raw.len() {
+                break;
+            }
+            raw = after_bracket;
+        }
+
+        let valid = if is_scheme {
+            let prefix_len = if raw.starts_with("https://") { 8 } else { 7 };
+            raw.len() > prefix_len
+        } else {
+            // `www.<domain>.<tld>`
+            raw.strip_prefix("www.")
+                .is_some_and(|host| !host.is_empty() && host.contains('.'))
+        };
+
+        if valid {
+            let normalized = if is_www {
+                format!("https://{raw}")
+            } else {
+                raw.to_string()
+            };
+            if !urls.contains(&normalized) {
+                urls.push(normalized);
+            }
+        }
+        i += end.max(1);
+    }
+    urls
 }
 
 /// `HH:MM` for messages.
@@ -106,5 +263,31 @@ pub fn format_chat_time(ts: i64) -> String {
         dt.format("%m-%d").to_string()
     } else {
         dt.format("%Y-%m-%d").to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_urls_and_strips_trailing_punctuation() {
+        assert_eq!(
+            extract_urls("Check https://example.com/a?x=1&y=2. Also http://foo.bar, and www.rust-lang.org!"),
+            vec![
+                "https://example.com/a?x=1&y=2",
+                "http://foo.bar",
+                "https://www.rust-lang.org",
+            ]
+        );
+        assert_eq!(
+            extract_urls("(see https://en.wikipedia.org/wiki/Rust_(programming_language))"),
+            vec!["https://en.wikipedia.org/wiki/Rust_(programming_language)"]
+        );
+        assert_eq!(
+            extract_urls("看看这个https://example.com/path，还有[链接](https://test.org/abc)"),
+            vec!["https://example.com/path", "https://test.org/abc"]
+        );
+        assert!(extract_urls("just https:// or www. or foo.www.bar").is_empty());
     }
 }
